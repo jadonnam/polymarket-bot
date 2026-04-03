@@ -1,11 +1,19 @@
 import os
 import time
+import threading
 import requests
+from flask import Flask
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 
 last_data = {}
+
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return "Bot is running"
 
 def get_markets():
     url = "https://gamma-api.polymarket.com/markets?limit=50&active=true"
@@ -59,8 +67,16 @@ def check():
 
         last_data[mid] = prob
 
-print("봇 실행 시작")
+def bot_loop():
+    print("봇 시작")
 
-while True:
-    check()
-    time.sleep(60)
+    while True:
+        check()
+        time.sleep(60)
+
+if __name__ == "__main__":
+    thread = threading.Thread(target=bot_loop)
+    thread.start()
+
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
