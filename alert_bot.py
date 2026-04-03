@@ -38,7 +38,7 @@ def send(msg):
 
 def check():
     global last_data
-
+    send("봇 살아있음 테스트")
     markets = get_markets()
 
     for m in markets:
