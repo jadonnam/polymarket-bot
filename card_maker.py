@@ -16,7 +16,6 @@ DESC = (222, 222, 228)
 BRAND = (165, 165, 172)
 
 ALERT_RED = (255, 76, 76)
-ALERT_BG = (120, 18, 18)
 ALERT_DESC = (245, 230, 230)
 
 TITLE_MAX_WIDTH = 470
@@ -45,8 +44,28 @@ def fit_cover(img, target_size):
 def add_normal_overlay(base):
     base = base.convert("RGBA")
 
+    # 전체 살짝 어둡게
     overall = Image.new("RGBA", (W, H), (0, 0, 0, 42))
     base = Image.alpha_composite(base, overall)
+
+    # 왼쪽 그라데이션
+    grad = Image.new("L", (W, H), 0)
+    grad_px = grad.load()
+
+    safe_width = int(W * 0.45)
+
+    for x in range(W):
+        if x <= safe_width:
+            alpha = int(110 * (1 - x / safe_width))
+        else:
+            alpha = 0
+
+        for y in range(H):
+            grad_px[x, y] = alpha
+
+    black = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    black.putalpha(grad)
+    base = Image.alpha_composite(base, black)
 
     return base.convert("RGB")
 
@@ -54,9 +73,28 @@ def add_normal_overlay(base):
 def add_alert_overlay(base):
     base = base.convert("RGBA")
 
-    # 더 강한 붉은 톤
-    overall = Image.new("RGBA", (W, H), (28, 0, 0, 120))
+    # 전체를 더 강하게 누르되 붉은 톤 추가
+    overall = Image.new("RGBA", (W, H), (28, 0, 0, 95))
     base = Image.alpha_composite(base, overall)
+
+    # 왼쪽이 더 어두워지는 속보용 그라데이션
+    grad = Image.new("L", (W, H), 0)
+    grad_px = grad.load()
+
+    safe_width = int(W * 0.50)
+
+    for x in range(W):
+        if x <= safe_width:
+            alpha = int(145 * (1 - x / safe_width))
+        else:
+            alpha = 0
+
+        for y in range(H):
+            grad_px[x, y] = alpha
+
+    left_dark = Image.new("RGBA", (W, H), (20, 0, 0, 0))
+    left_dark.putalpha(grad)
+    base = Image.alpha_composite(base, left_dark)
 
     return base.convert("RGB")
 
@@ -119,7 +157,6 @@ def make_card(title1_parts, title2_parts, desc_lines, brand_text="jadonnam", mod
 
     font_brand = get_font(REG_FONT, 34)
 
-    # 제목 폰트
     if mode == "alert":
         font_title1 = fit_rich_font(draw, title1_parts, BOLD_FONT, 100, 72, TITLE_MAX_WIDTH)
         font_title2 = fit_rich_font(draw, title2_parts, BOLD_FONT, 96, 68, TITLE_MAX_WIDTH)
@@ -129,17 +166,14 @@ def make_card(title1_parts, title2_parts, desc_lines, brand_text="jadonnam", mod
         font_title2 = fit_rich_font(draw, title2_parts, BOLD_FONT, 92, 68, TITLE_MAX_WIDTH)
         desc_fill = DESC
 
-    # 상단 브랜드만 유지
     draw.text((80, 92), brand_text, font=font_brand, fill=BRAND)
 
-    # 제목 위치
     title_y1 = 248
     title_y2 = 360
 
     draw_rich_text(draw, 80, title_y1, title1_parts, font_title1)
     draw_rich_text(draw, 80, title_y2, title2_parts, font_title2)
 
-    # 설명
     desc_y = 555
     line_gap = 64
 

@@ -1,3 +1,5 @@
+import alert
+print("ALERT FILE:", alert.__file__)
 from news import get_news
 from rewrite import rewrite
 from polymarket import get_polymarket_markets, parse_best_market
@@ -25,7 +27,7 @@ def detect_poly_mode(question, yes_price):
         return "alert"
 
     try:
-        if yes_price is not None and float(yes_price) >= 0.75:
+        if yes_price is not None and 0.05 < float(yes_price) < 0.95:
             return "alert"
     except:
         pass
@@ -54,22 +56,18 @@ def score_news_item(title, summary, mode, rewritten):
     text = f"{title} {summary}".lower()
     output = f"{rewritten['title1']} {rewritten['title2']}"
 
-    # alert면 기본 가산
     if mode == "alert":
         score += 30
 
-    # 키워드 가산
     strong_words = ["iran", "war", "attack", "missile", "oil", "gold", "bitcoin", "fed", "inflation", "tariff"]
     for w in strong_words:
         if w in text:
             score += 8
 
-    # 숫자 가산
     numbers = extract_numbers(f"{title} {summary}")
     if numbers:
         score += 10
 
-    # 결과 문구에 강한 단어 있으면 가산
     hot_words = ["급등", "전쟁", "긴장", "리스크", "불안", "폭등", "하락"]
     for w in hot_words:
         if w in output:
@@ -85,7 +83,6 @@ def score_poly_item(question, volume, yes_price, mode, rewritten):
     if mode == "alert":
         score += 35
 
-    # 거래량 점수
     try:
         v = float(volume)
         if v >= 10000000:
@@ -97,13 +94,13 @@ def score_poly_item(question, volume, yes_price, mode, rewritten):
     except:
         pass
 
-    # 확률 극단값 점수
     try:
         p = float(yes_price)
-        if p >= 0.8 or p <= 0.2:
-            score += 15
-        elif p >= 0.65 or p <= 0.35:
-            score += 8
+        if 0.05 < p < 0.95:
+            if p >= 0.8 or p <= 0.2:
+                score += 15
+            elif p >= 0.65 or p <= 0.35:
+                score += 8
     except:
         pass
 

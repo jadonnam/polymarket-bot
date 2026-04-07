@@ -71,7 +71,6 @@ def is_expired(end_date):
         return False
 
 def is_market_valid(market):
-    # inactive / closed 제외
     if market.get("closed") is True:
         return False
 
@@ -79,18 +78,15 @@ def is_market_valid(market):
     if active is False:
         return False
 
-    # 마감 지났으면 제외
     end_date = market.get("endDate") or market.get("end_date")
     if is_expired(end_date):
         return False
 
-    # 확률이 너무 끝에 붙은 시장 제외
     yes_price = parse_yes_price(market)
     if yes_price is not None:
-       if yes_price >= 0.95 or yes_price <= 0.05:
+        if yes_price >= 0.95 or yes_price <= 0.05:
             return False
 
-    # 질문 자체가 이상하면 제외
     question = (market.get("question") or "").strip()
     if not question:
         return False
@@ -98,8 +94,7 @@ def is_market_valid(market):
     return True
 
 def filter_valid_markets(markets):
-    filtered = [m for m in markets if is_market_valid(m)]
-    return filtered
+    return [m for m in markets if is_market_valid(m)]
 
 def parse_best_market(markets):
     valid_markets = filter_valid_markets(markets)

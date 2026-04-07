@@ -1,15 +1,22 @@
-import os
 import requests
+from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+def send_image(image_path, caption=""):
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
 
-def send_image(image_path):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
+    print("TOKEN RAW:", repr(TELEGRAM_BOT_TOKEN))
+    print("CHAT_ID:", repr(TELEGRAM_CHAT_ID))
+    print("URL:", url)
 
-    with open(image_path, "rb") as img:
-        requests.post(
+    with open(image_path, "rb") as f:
+        res = requests.post(
             url,
-            data={"chat_id": CHAT_ID},
-            files={"photo": img}
+            files={"photo": f},
+            data={
+                "chat_id": TELEGRAM_CHAT_ID,
+                "caption": caption
+            }
         )
+
+    print("STATUS:", res.status_code)
+    print("RESPONSE:", res.text)
