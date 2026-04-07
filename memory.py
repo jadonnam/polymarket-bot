@@ -30,7 +30,7 @@ def is_duplicate(title):
 def add_history(title):
     history = load_history()
     history.append(title)
-    history = history[-50:]
+    history = history[-100:]
     save_history(history)
 
 def load_topics():
@@ -40,11 +40,17 @@ def save_topics(data):
     _save_json(TOPIC_FILE, data)
 
 def is_same_topic(topic):
+    if topic in ["general", "sports", "other", "unknown", ""]:
+        return False
     topics = load_topics()
-    return topic in topics[-3:]
+    if not topics:
+        return False
+    return topics[-1] == topic
 
 def add_topic(topic):
+    if topic in ["general", "sports", "other", "unknown", ""]:
+        return
     topics = load_topics()
     topics.append(topic)
-    topics = topics[-20:]
+    topics = topics[-30:]
     save_topics(topics)

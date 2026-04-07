@@ -6,7 +6,7 @@ client = OpenAI(api_key=(os.getenv("OPENAI_API_KEY") or "").strip())
 TOPIC_RULES = """
 주제 고정 규칙:
 - 원문 주제를 절대 바꾸지 말 것
-- 전쟁/공격/미사일/이란/미군 개입 뉴스면 지정학/전쟁 리스크로만 써라
+- 전쟁/공격/미사일/이란/미군 개입/휴전 뉴스면 지정학/전쟁 리스크로만 써라
 - 유가 뉴스면 유가/기름값으로만 써라
 - 금 뉴스면 금값/안전자산으로만 써라
 - 환율 뉴스면 환율/물가/수입비용으로만 써라
@@ -15,26 +15,36 @@ TOPIC_RULES = """
 - 사실을 지어내지 말 것
 """
 
-IMPACT_WORDS = """
-강한 표현 우선 규칙:
-- 숫자와 함께 쓰기 좋은 동사를 우선 사용
-- 제목2는 설명형보다 충격형으로 써라
-- 아래 표현을 우선 검토해서 자연스러운 것만 사용:
-  터졌다 / 쏠렸다 / 몰렸다 / 몰려든다 / 흔들린다 / 번진다 / 치솟는다 / 커진다 / 번졌다
-- "영향이 있다", "가능성이 있다", "전망이다", "우려가 있다" 같은 약한 표현은 최대한 금지
-- 짧고 세게 써라
-"""
+BAD_WORDS = ["상황", "흐름", "영향", "변화", "확대", "심화", "통제", "가능성", "발생"]
+GOOD_WORDS = ["급등", "급락", "공격", "공습", "개입", "휴전", "충돌", "전쟁", "붕괴", "폭등", "쏠린다", "몰렸다", "흔들린다", "튀었다", "뛴다"]
 
-def rewrite(title, desc, mode="normal", number_hint=None):
+def has_bad_words(text):
+    return any(word in text for word in BAD_WORDS)
+
+def has_good_words(text):
+    return any(word in text for word in GOOD_WORDS)
+
+def is_valid_result(result):
+    if has_bad_words(result["title1"]) or has_bad_words(result["title2"]):
+        return False
+    if "100% 발생" in result["title1"] or "100% 발생" in result["title2"]:
+        return False
+    if "리스크 커진다" in result["title2"]:
+        return False
+    if not has_good_words(result["title1"]) and "%" not in result["title1"] and "원" not in result["title1"]:
+        return False
+    return True
+
+def rewrite(title, desc, mode="normal", number_hint=None, retry=0):
     if mode == "alert":
         extra = f"""
 추가 조건:
 - 속보 카드 스타일
 - 제목1은 강하게
 - 제목2는 지금 당장 체감되는 영향
-- 가능하면 "급등", "폭등", "긴장", "충돌", "전쟁", "리스크" 같은 단어 우선
+- 가능하면 "급등", "폭등", "긴장", "충돌", "전쟁", "개입", "붕괴" 같은 단어 우선
 - 제목1은 이미 일어난 것처럼 표현
-- 제목2는 반드시 "지금" 또는 "바로" 느낌이 나게 써라
+- 제목2는 반드시 지금 당장 체감되는 결과처럼 써라
 - 숫자가 있으면 최대한 제목1 또는 제목2에 자연스럽게 넣어라
 - 사용할 수 있는 숫자 힌트: {number_hint if number_hint else "없음"}
 """
@@ -55,8 +65,6 @@ def rewrite(title, desc, mode="normal", number_hint=None):
 
 {TOPIC_RULES}
 
-{IMPACT_WORDS}
-
 조건:
 - 무조건 한국어
 - 매우 짧게
@@ -68,11 +76,15 @@ def rewrite(title, desc, mode="normal", number_hint=None):
 - 뉴스 제목 그대로 번역 금지
 - 설명형 금지
 - 추상 표현보다 행동/상태 표현 우선
-- 제목1은 상황
+- 제목1은 사건 자체
 - 제목2는 내 돈/시장 반응
 - 제목2는 가능하면 숫자 + 행동 구조를 우선
-- "영향이 커진다", "시장 불확실성 커진다" 같은 약한 문장보다
-  "돈 몰렸다", "지금 흔들린다", "시장 먼저 튄다", "자금 쏠린다" 같은 문장을 우선
+- 추상적인 단어 절대 사용 금지: 상황, 흐름, 영향, 변화, 확대, 심화, 통제, 가능성, 발생
+- 반드시 눈에 보이는 사건/행동으로 표현할 것
+- 제목1은 사건 자체 (폭발, 충돌, 개입, 붕괴, 급등 등)
+- 제목2는 내 돈에 바로 체감되는 결과
+- 허용 행동 단어:
+  폭등, 급등, 급락, 붕괴, 충돌, 전쟁, 공격, 개입, 긴장, 폭발, 흔들림, 몰림, 쏠림, 휴전, 뛴다
 {extra}
 
 좋은 예시:
@@ -83,7 +95,7 @@ def rewrite(title, desc, mode="normal", number_hint=None):
 
 제목1: 미군 개입 86%
 제목2: 지금 돈 쏠린다
-설명1: 전쟁 리스크 커지면
+설명1: 전쟁 불안 커지면
 설명2: 투자 심리 먼저 꺾인다
 
 제목1: 환율 1,535원
@@ -96,24 +108,6 @@ def rewrite(title, desc, mode="normal", number_hint=None):
 설명1: 불안 심리 커지면
 설명2: 안전자산 먼저 간다
 
-제목1: 700억 몰렸다
-제목2: 지금 돈 쏠린다
-설명1: 긴장감 커질수록
-설명2: 자금부터 반응한다
-
-나쁜 예시:
-제목1: 원자재 가격 급등
-제목2: 제조업 타격 확산
-
-제목1: 유가 증가 전망
-제목2: 공급 불안 심화
-
-제목1: 부동산 시장 위축
-제목2: 내 돈 흐름 막힌다
-
-제목1: 시장 불확실성 증가
-제목2: 투자 심리 약화
-
 영어 뉴스:
 제목: {title}
 내용: {desc}
@@ -123,12 +117,6 @@ def rewrite(title, desc, mode="normal", number_hint=None):
 제목2: ...
 설명1: ...
 설명2: ...
-
-중요:
-- 출력은 반드시 4줄만
-- 군더더기 설명 금지
-- 숫자가 있으면 최대한 살려라
-- 제목2는 최대한 약하지 않게 써라
 """
 
     res = client.chat.completions.create(
@@ -140,10 +128,10 @@ def rewrite(title, desc, mode="normal", number_hint=None):
     text = res.choices[0].message.content.strip().split("\n")
 
     result = {
-        "title1": "시장 다시 흔들린다",
-        "title2": "지금 돈 흐름 바뀐다",
+        "title1": "시장 크게 흔들린다",
+        "title2": "지금 돈 몰린다",
         "desc1": "불안 심리 커지면",
-        "desc2": "자산 가격 먼저 흔들린다"
+        "desc2": "자산 가격 먼저 튄다"
     }
 
     for line in text:
@@ -156,5 +144,8 @@ def rewrite(title, desc, mode="normal", number_hint=None):
             result["desc1"] = line.replace("설명1:", "").strip()
         elif line.startswith("설명2:"):
             result["desc2"] = line.replace("설명2:", "").strip()
+
+    if retry < 2 and not is_valid_result(result):
+        return rewrite(title, desc, mode=mode, number_hint=number_hint, retry=retry + 1)
 
     return result

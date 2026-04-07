@@ -21,12 +21,10 @@ ALERT_DESC = (245, 230, 230)
 TITLE_MAX_WIDTH = 470
 DESC_MAX_WIDTH = 430
 
-
 def get_font(path, size):
     if os.path.exists(path):
         return ImageFont.truetype(path, size)
     return ImageFont.load_default()
-
 
 def fit_cover(img, target_size):
     tw, th = target_size
@@ -40,15 +38,12 @@ def fit_cover(img, target_size):
     top = (nh - th) // 2
     return img.crop((left, top, left + tw, top + th))
 
-
 def add_normal_overlay(base):
     base = base.convert("RGBA")
 
-    # 전체 살짝 어둡게
     overall = Image.new("RGBA", (W, H), (0, 0, 0, 42))
     base = Image.alpha_composite(base, overall)
 
-    # 왼쪽 그라데이션
     grad = Image.new("L", (W, H), 0)
     grad_px = grad.load()
 
@@ -69,15 +64,12 @@ def add_normal_overlay(base):
 
     return base.convert("RGB")
 
-
 def add_alert_overlay(base):
     base = base.convert("RGBA")
 
-    # 전체를 더 강하게 누르되 붉은 톤 추가
     overall = Image.new("RGBA", (W, H), (28, 0, 0, 95))
     base = Image.alpha_composite(base, overall)
 
-    # 왼쪽이 더 어두워지는 속보용 그라데이션
     grad = Image.new("L", (W, H), 0)
     grad_px = grad.load()
 
@@ -96,8 +88,23 @@ def add_alert_overlay(base):
     left_dark.putalpha(grad)
     base = Image.alpha_composite(base, left_dark)
 
-    return base.convert("RGB")
+    red_glow = Image.new("RGBA", (W, H), (110, 10, 10, 0))
+    red_grad = Image.new("L", (W, H), 0)
+    red_px = red_grad.load()
 
+    for x in range(W):
+        if x <= int(W * 0.38):
+            alpha = int(85 * (1 - x / (W * 0.38)))
+        else:
+            alpha = 0
+
+        for y in range(H):
+            red_px[x, y] = alpha
+
+    red_glow.putalpha(red_grad)
+    base = Image.alpha_composite(base, red_glow)
+
+    return base.convert("RGB")
 
 def measure_rich_text(draw, parts, font):
     total = 0
@@ -107,7 +114,6 @@ def measure_rich_text(draw, parts, font):
         bbox = draw.textbbox((0, 0), text, font=font)
         total += (bbox[2] - bbox[0])
     return total
-
 
 def fit_rich_font(draw, parts, font_path, start_size, min_size, max_width):
     size = start_size
@@ -119,7 +125,6 @@ def fit_rich_font(draw, parts, font_path, start_size, min_size, max_width):
         size -= 2
     return get_font(font_path, min_size)
 
-
 def fit_plain_font(draw, text, font_path, start_size, min_size, max_width):
     size = start_size
     while size >= min_size:
@@ -130,7 +135,6 @@ def fit_plain_font(draw, text, font_path, start_size, min_size, max_width):
         size -= 2
     return get_font(font_path, min_size)
 
-
 def draw_rich_text(draw, x, y, parts, font):
     cur_x = x
     for text, color in parts:
@@ -139,7 +143,6 @@ def draw_rich_text(draw, x, y, parts, font):
         draw.text((cur_x, y), text, font=font, fill=color)
         bbox = draw.textbbox((cur_x, y), text, font=font)
         cur_x = bbox[2]
-
 
 def make_card(title1_parts, title2_parts, desc_lines, brand_text="jadonnam", mode="normal"):
     if os.path.exists(BG_PATH):

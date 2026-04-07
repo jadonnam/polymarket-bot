@@ -5,6 +5,25 @@ from datetime import datetime, timezone
 
 API_URL = "https://gamma-api.polymarket.com/markets"
 
+ALLOWED_TOPICS = {"geopolitics", "economy", "crypto", "politics"}
+
+SPORTS_KEYWORDS = [
+    "fc ", "cf ", "arsenal", "real madrid", "bayern", "sporting cp",
+    "nba", "nfl", "mlb", "nhl", "fifa", "world cup", "finals",
+    "vs.", "vs ", "o/u", "over/under", "tennis", "masters",
+    "cameron norrie", "de minaur", "spurs", "royals", "guardians"
+]
+
+POPULAR_KEYWORDS = [
+    "iran", "war", "attack", "missile", "ceasefire", "regime", "israel",
+    "oil", "wti", "crude", "gold", "bitcoin", "btc", "ethereum", "eth",
+    "fed", "inflation", "rate", "recession", "economy", "s&p 500", "nasdaq",
+    "dow", "trump", "election", "president", "white house", "china", "russia",
+    "taiwan", "us ", "u.s.", "american"
+]
+
+LOW_QUALITY_WORDS = ["will", "vs", "win", "match", "game"]
+
 def parse_outcome_prices(raw):
     if raw is None:
         return []
@@ -146,11 +165,10 @@ def parse_datetime_safe(value):
     return None
 
 def is_market_resolved_or_closed(market):
-    for key in ["closed", "resolved", "archived", "enableOrderBook"]:
+    for key in ["closed", "resolved", "archived"]:
         value = market.get(key)
-        if isinstance(value, bool):
-            if key in ["closed", "resolved", "archived"] and value is True:
-                return True
+        if isinstance(value, bool) and value is True:
+            return True
 
     status_text = " ".join([
         str(market.get("status", "")),
@@ -198,6 +216,27 @@ def is_market_expired(market):
 
     return False
 
+def classify_topic(title, description=""):
+    text = f"{title} {description}".lower()
+
+    if any(k in text for k in SPORTS_KEYWORDS):
+        return "sports"
+
+    if any(k in text for k in ["iran", "war", "military", "troops", "missile", "strike", "attack", "israel", "china", "taiwan", "ceasefire", "kharg island", "conflict", "regime"]):
+        return "geopolitics"
+    if any(k in text for k in ["trump", "election", "president", "white house", "campaign", "vote", "senate", "gavin newsom"]):
+        return "politics"
+    if any(k in text for k in ["fed", "inflation", "rate", "recession", "economy", "stocks", "oil", "gold", "s&p 500", "nasdaq", "dow", "wti", "crude", "strait of hormuz", "hormuz"]):
+        return "economy"
+    if any(k in text for k in ["bitcoin", "btc", "ethereum", "eth", "crypto", "solana"]):
+        return "crypto"
+
+    return "general"
+
+def is_popular_market(question, description=""):
+    text = f"{question} {description}".lower()
+    return any(k in text for k in POPULAR_KEYWORDS)
+
 def is_valid_market(market):
     if is_market_resolved_or_closed(market):
         return False
@@ -206,13 +245,26 @@ def is_valid_market(market):
         return False
 
     question = str(market.get("question", "")).strip()
+    description = str(market.get("description", "") or "").strip()
+
     if not question:
+        return False
+
+    topic = classify_topic(question, description)
+
+    if topic not in ALLOWED_TOPICS:
+        return False
+
+    if not is_popular_market(question, description):
+        return False
+
+    if any(w in question.lower() for w in LOW_QUALITY_WORDS):
         return False
 
     yes_price = pick_yes_price(market)
     volume = pick_volume(market)
 
-    if volume <= 0:
+    if volume <= 50000:
         return False
 
     if yes_price < 0 or yes_price > 1:
@@ -227,6 +279,8 @@ def market_score(market):
     yes_price = pick_yes_price(market)
     volume = pick_volume(market)
     question = str(market.get("question", "")).lower()
+    description = str(market.get("description", "") or "").lower()
+    topic = classify_topic(question, description)
 
     score = 0
     score += min(volume / 100000, 300)
@@ -234,13 +288,22 @@ def market_score(market):
     if 0.05 < yes_price < 0.95:
         score += 40
 
-    for word in ["iran", "war", "attack", "missile", "military", "troops", "trump", "bitcoin", "fed", "oil", "gold"]:
+    if topic == "geopolitics":
+        score += 30
+    elif topic == "economy":
+        score += 22
+    elif topic == "crypto":
+        score += 16
+    elif topic == "politics":
+        score += 10
+
+    for word in ["iran", "war", "attack", "missile", "military", "troops", "oil", "gold", "bitcoin", "fed", "wti", "crude", "trump"]:
         if word in question:
             score += 15
 
     return score
 
-def get_polymarket_markets(limit=50):
+def get_polymarket_markets(limit=80):
     params = {
         "limit": limit,
         "active": "true",
@@ -256,45 +319,37 @@ def get_polymarket_markets(limit=50):
     if not isinstance(data, list):
         return []
 
-    valid_markets = [m for m in data if is_valid_market(m)]
-    return valid_markets
+    return [m for m in data if is_valid_market(m)]
 
-def parse_best_market(markets):
+def parse_best_market(markets, excluded_titles=None):
     if not markets:
         raise Exception("No valid market data")
 
+    excluded_titles = set(excluded_titles or [])
     ranked = sorted(markets, key=market_score, reverse=True)
-    m = ranked[0]
 
-    yes_price = pick_yes_price(m)
-    volume = pick_volume(m)
-    end_date = pick_end_date(m)
+    for m in ranked:
+        question = m.get("question", "Unknown Market")
+        if question in excluded_titles:
+            continue
 
-    return {
-        "question": m.get("question", "Unknown Market"),
-        "volume": volume,
-        "yes_price": yes_price,
-        "end_date": end_date,
-        "description": m.get("description", "") or ""
-    }
+        yes_price = pick_yes_price(m)
+        volume = pick_volume(m)
+        end_date = pick_end_date(m)
 
-def classify_topic(title, description=""):
-    text = f"{title} {description}".lower()
+        return {
+            "question": question,
+            "volume": volume,
+            "yes_price": yes_price,
+            "end_date": end_date,
+            "description": m.get("description", "") or ""
+        }
 
-    if any(k in text for k in ["iran", "war", "military", "troops", "missile", "strike", "attack", "israel", "china", "taiwan"]):
-        return "geopolitics"
-    if any(k in text for k in ["trump", "election", "president", "white house", "campaign", "vote", "senate"]):
-        return "politics"
-    if any(k in text for k in ["fed", "inflation", "rate", "recession", "economy", "stocks", "oil", "gold"]):
-        return "economy"
-    if any(k in text for k in ["bitcoin", "btc", "ethereum", "eth", "crypto", "solana"]):
-        return "crypto"
+    raise Exception("No non-duplicate market data")
 
-    return "general"
-
-def get_top_market():
-    markets = get_polymarket_markets(limit=50)
-    best = parse_best_market(markets)
+def get_top_market(excluded_titles=None):
+    markets = get_polymarket_markets(limit=80)
+    best = parse_best_market(markets, excluded_titles=excluded_titles)
 
     probability_text = f"{int(round(parse_float(best['yes_price']) * 100))}%"
     topic = classify_topic(best["question"], best.get("description", ""))

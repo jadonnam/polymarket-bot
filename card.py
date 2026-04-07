@@ -1,36 +1,32 @@
-from card_maker import make_card
 import re
+from card_maker import make_card, WHITE
 
-WHITE = (255, 255, 255)
-YELLOW = (255, 214, 87)
-RED = (255, 92, 92)
+HIGHLIGHT_COLOR = (247, 205, 70)
 
-RED_WORDS = [
-    "급등", "급락", "하락", "전쟁", "충돌", "긴장", "위기",
-    "경고", "폭락", "불안", "리스크", "불안정", "폭등", "급변",
-    "공격", "미사일", "붕괴", "터졌다"
-]
+def split_highlight(text):
+    if not text:
+        return [(text, WHITE)]
 
-def colorize_text(text, mode="normal"):
-    for word in RED_WORDS:
-        if word in text:
-            before, after = text.split(word, 1)
-            return [(before, WHITE), (word, RED), (after, WHITE)]
-
-    m = re.search(r'[\+\-]?[\d,]+(?:\.\d+)?[%원달러배억만]?', text)
-    if m:
-        number = m.group(0)
-        before = text[:m.start()]
-        after = text[m.end():]
-        return [(before, WHITE), (number, YELLOW), (after, WHITE)]
+    match = re.search(r'[$]?\d[\d,\.]*\s?(억원|억|만원|원|달러|%|배|일|명)?', text)
+    if match:
+        start, end = match.span()
+        return [
+            (text[:start], WHITE),
+            (text[start:end], HIGHLIGHT_COLOR),
+            (text[end:], WHITE),
+        ]
 
     return [(text, WHITE)]
 
 def create_card(rewritten, mode="normal"):
-    path = make_card(
-        title1_parts=colorize_text(rewritten["title1"], mode=mode),
-        title2_parts=colorize_text(rewritten["title2"], mode=mode),
-        desc_lines=[rewritten["desc1"], rewritten["desc2"]],
+    title1_parts = split_highlight(rewritten["title1"])
+    title2_parts = split_highlight(rewritten["title2"])
+    desc_lines = [rewritten["desc1"], rewritten["desc2"]]
+
+    return make_card(
+        title1_parts=title1_parts,
+        title2_parts=title2_parts,
+        desc_lines=desc_lines,
+        brand_text="jadonnam",
         mode=mode
     )
-    return path
