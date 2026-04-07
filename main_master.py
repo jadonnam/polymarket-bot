@@ -1,12 +1,12 @@
-import alert
-print("ALERT FILE:", alert.__file__)
 from news import get_news
 from rewrite import rewrite
-from polymarket import get_polymarket_markets, parse_best_market
+from polymarket import get_polymarket_markets, parse_best_market, classify_topic
 from rewrite_poly import rewrite_poly
 from card import create_card
 from telegram import send_image
 from utils_numbers import extract_numbers, choose_best_number
+from image_generator import safe_generate_bg
+from memory import is_duplicate, add_history, is_same_topic, add_topic
 
 NEWS_ALERT_KEYWORDS = [
     "war", "iran", "attack", "missile", "oil", "gold",
@@ -109,8 +109,7 @@ def score_poly_item(question, volume, yes_price, mode, rewritten):
         if w in text:
             score += 8
 
-    hot_words = ["급등", "전쟁", "긴장", "리스크", "불안", "확률", "%"]
-    for w in hot_words:
+    for w in ["급등", "전쟁", "긴장", "리스크", "불안", "확률", "%"]:
         if w in output:
             score += 6
 
@@ -130,12 +129,14 @@ def build_news_candidate():
         rewritten = rewrite(title, summary, mode=mode, number_hint=number_hint)
 
     score = score_news_item(title, summary, mode, rewritten)
+    topic = classify_topic(title, summary)
 
     return {
         "source": "news",
         "raw_title": title,
         "raw_summary": summary,
         "mode": mode,
+        "topic": topic,
         "rewritten": rewritten,
         "score": score
     }
@@ -161,11 +162,19 @@ def build_poly_candidate():
         rewritten
     )
 
+    raw_summary = (
+        f"volume={market['volume']}, yes={market['yes_price']}, "
+        f"end={market['end_date']}, desc={market.get('description', '')}"
+    )
+
+    topic = classify_topic(market["question"], market.get("description", ""))
+
     return {
         "source": "polymarket",
         "raw_title": market["question"],
-        "raw_summary": f"volume={market['volume']}, yes={market['yes_price']}, end={market['end_date']}",
+        "raw_summary": raw_summary,
         "mode": mode,
+        "topic": topic,
         "rewritten": rewritten,
         "score": score
     }
@@ -182,16 +191,39 @@ def run():
     else:
         winner = news_candidate
 
+    title = winner["raw_title"]
+    topic = winner["topic"]
+
+    if is_duplicate(title):
+        print("중복 시장 → 스킵")
+        return
+
+    if is_same_topic(topic):
+        print("같은 주제 반복 → 스킵")
+        return
+
     print("선택 소스:", winner["source"])
     print("원본:", winner["raw_title"])
     print("모드:", winner["mode"])
+    print("주제:", winner["topic"])
     print("제목1:", winner["rewritten"]["title1"])
     print("제목2:", winner["rewritten"]["title2"])
     print("설명1:", winner["rewritten"]["desc1"])
     print("설명2:", winner["rewritten"]["desc2"])
 
+    safe_generate_bg(
+        raw_title=winner["raw_title"],
+        raw_summary=winner["raw_summary"],
+        mode=winner["mode"],
+        source=winner["source"],
+        output_path="bg.jpg"
+    )
+
     path = create_card(winner["rewritten"], mode=winner["mode"])
     send_image(path)
+
+    add_history(title)
+    add_topic(topic)
 
     print("전송 완료")
 

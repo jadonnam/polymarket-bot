@@ -1,22 +1,17 @@
+BOT_TOKEN = "8605896650:AAECzR130hjNPSks1In-kiCaRggasAHG1lc"
+CHAT_ID = "-1003659436382"
+
 import requests
-from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 
-def send_image(image_path, caption=""):
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
+def send_image(image_path):
+    if not BOT_TOKEN or not CHAT_ID:
+        raise RuntimeError("BOT_TOKEN 또는 CHAT_ID가 비어있음")
 
-    print("TOKEN RAW:", repr(TELEGRAM_BOT_TOKEN))
-    print("CHAT_ID:", repr(TELEGRAM_CHAT_ID))
-    print("URL:", url)
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
 
     with open(image_path, "rb") as f:
-        res = requests.post(
-            url,
-            files={"photo": f},
-            data={
-                "chat_id": TELEGRAM_CHAT_ID,
-                "caption": caption
-            }
-        )
+        files = {"photo": f}
+        data = {"chat_id": CHAT_ID}
+        res = requests.post(url, files=files, data=data)
 
-    print("STATUS:", res.status_code)
-    print("RESPONSE:", res.text)
+    print("텔레그램 응답:", res.status_code, res.text)
