@@ -1,196 +1,179 @@
-from news import get_news
+import json
+import os
+import random
+
+from news import get_news_candidate
 from rewrite import rewrite
-from polymarket import get_polymarket_markets, parse_best_market, classify_topic
+from polymarket import get_polymarket_markets, classify_topic
 from rewrite_poly import rewrite_poly
 from card import create_card
 from telegram import send_image
-from utils_numbers import extract_numbers, choose_best_number
-from image_generator import safe_generate_bg
-from memory import is_duplicate, add_history, is_same_topic, add_topic, load_history
 from market_state import detect_surge, update_market_snapshot
+from memory import is_duplicate, add_history, is_same_topic, add_topic
 
-NEWS_ALERT_KEYWORDS = [
-    "war", "iran", "attack", "missile", "oil", "gold",
-    "inflation", "rate", "fed", "bitcoin", "btc", "tariff",
-    "crash", "surge", "jump", "spike", "drop", "collapse",
-    "ceasefire", "conflict", "breaking", "hormuz", "brent", "wti"
-]
-
+MIX_FILE = "source_mix.json"
 ALLOWED_TOPICS = {"geopolitics", "economy", "crypto", "politics"}
 
-MONEY_WORDS = [
-    "oil", "wti", "crude", "brent", "gold", "bitcoin", "btc", "ethereum", "eth",
-    "fed", "inflation", "rate", "rates", "tariff", "nasdaq", "s&p", "dow",
-    "hormuz", "strait", "treasury", "yield", "cpi", "recession", "stocks"
-]
-
-ABSTRACT_BANNED = [
-    "긴장", "불안", "심리", "가능성", "우려", "흐름", "상황",
-    "불확실성", "관심", "주목", "해석", "촉각"
-]
+POLY_MIN_SCORE = 64
+NEWS_MIN_SCORE = 58
 
 
-def detect_news_mode(title, summary):
-    text = f"{title} {summary}".lower()
-    if any(k in text for k in NEWS_ALERT_KEYWORDS):
-        return "alert"
-    return "normal"
+def load_mix():
+    if not os.path.exists(MIX_FILE):
+        return []
+    try:
+        with open(MIX_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except:
+        return []
 
 
-def detect_poly_mode(question, yes_price, topic, is_surge=False):
+def save_mix(data):
+    with open(MIX_FILE, "w", encoding="utf-8") as f:
+        json.dump(data[-40:], f, ensure_ascii=False, indent=2)
+
+
+def add_mix(source_name):
+    data = load_mix()
+    data.append(source_name)
+    save_mix(data)
+
+
+def recent_poly_count(n=6):
+    data = load_mix()
+    return sum(1 for x in data[-n:] if x == "polymarket")
+
+
+def recent_news_count(n=6):
+    data = load_mix()
+    return sum(1 for x in data[-n:] if x == "news")
+
+
+def source_bias():
+    # 뉴스 체감 비율 더 높게
+    if recent_poly_count(6) >= 4:
+        return "news_strong"
+    if recent_news_count(6) <= 1:
+        return "news_preferred"
+    return "balanced"
+
+
+def detect_poly_mode(question, topic, is_surge=False):
     text = question.lower()
 
     if is_surge:
+        return "alert"
+
+    if topic == "crypto":
         return "alert"
 
     if topic == "economy" and any(k in text for k in ["oil", "wti", "crude", "gold", "fed", "inflation", "tariff", "yield", "cpi"]):
         return "alert"
 
-    if topic == "crypto" and any(k in text for k in ["bitcoin", "btc", "ethereum", "eth"]):
+    if topic in {"politics", "geopolitics"} and any(k in text for k in ["trump", "deal", "tariff", "ceasefire", "war", "attack"]):
         return "alert"
 
     return "normal"
 
 
-def invalid_topic_shift(title, rewritten):
-    source = title.lower()
-    out = f"{rewritten['title1']} {rewritten['title2']} {rewritten['desc1']} {rewritten['desc2']}"
-
-    if any(k in source for k in ["iran", "missile", "attack", "war", "ceasefire"]):
-        bad = ["유류세", "전기요금", "부동산", "지원금", "대출"]
-        if any(b in out for b in bad):
-            return True
-
-    if "gold" in source and "금" not in out:
-        return True
-    if any(k in source for k in ["oil", "wti", "crude", "brent"]) and ("유가" not in out and "원유" not in out):
-        return True
-    if "bitcoin" in source and "비트" not in out:
-        return True
-    if "ethereum" in source and "이더" not in out and "이더리움" not in out:
-        return True
-    if any(k in source for k in ["fed", "rate", "inflation", "cpi"]) and not any(k in out for k in ["금리", "물가", "인플레"]):
-        return True
-
-    return False
-
-
-def score_news_item(title, summary, mode, rewritten):
-    score = 0
+def detect_news_mode(title, summary):
     text = f"{title} {summary}".lower()
-    output = f"{rewritten['title1']} {rewritten['title2']} {rewritten['desc1']} {rewritten['desc2']}"
+    if any(k in text for k in ["breaking", "trump", "tariff", "bitcoin", "oil", "gold", "fed", "inflation", "war", "attack", "yield", "cpi"]):
+        return "alert"
+    return "normal"
 
-    if mode == "alert":
-        score += 20
 
-    numbers = extract_numbers(f"{title} {summary}")
-    if numbers:
-        score += 16
+def score_news_candidate(title, summary, rewritten):
+    text = f"{title} {summary}".lower()
+    out = f"{rewritten['eyebrow']} {rewritten['title1']} {rewritten['title2']} {rewritten['desc1']} {rewritten['desc2']}"
+    score = 0
 
-    for w in MONEY_WORDS:
-        if w in text:
-            score += 10
+    for k in [
+        "bitcoin", "btc", "oil", "wti", "crude", "gold", "fed", "inflation",
+        "cpi", "yield", "tariff", "trump", "deal", "nasdaq", "dow", "s&p"
+    ]:
+        if k in text:
+            score += 15
 
-    if any(w in text for w in ["oil", "wti", "crude", "gold", "bitcoin", "btc", "inflation", "fed", "tariff", "yield"]):
-        score += 20
+    if any(k in out for k in [
+        "늦으면", "또", "지갑", "숨멎", "벌써", "구경만", "들뜸",
+        "처맞음", "멘붕", "식은땀", "배아픔", "난리", "쫄림"
+    ]):
+        score += 18
 
-    if any(w in text for w in ["iran", "war", "attack", "missile", "ceasefire"]) and not any(w in text for w in ["oil", "wti", "crude", "gold", "hormuz"]):
-        score -= 35
+    if any(k in out for k in [
+        "달러", "물가", "나스닥", "유가", "금값", "비트", "관세", "월가"
+    ]):
+        score += 18
 
-    if any(w in output for w in ABSTRACT_BANNED):
-        score -= 20
-
-    if "%" in output:
-        score += 10
-
+    # 뉴스는 최근성/신뢰감 보너스
+    score += 12
     return score
 
 
-def score_poly_item(question, volume, yes_price, mode, rewritten, is_surge=False):
-    score = 0
+def score_poly_candidate(question, volume, yes_price, rewritten, is_surge=False):
     text = question.lower()
-    output = f"{rewritten['title1']} {rewritten['title2']} {rewritten['desc1']} {rewritten['desc2']}"
-
-    if mode == "alert":
-        score += 12
-
-    if is_surge:
-        score += 30
+    out = f"{rewritten['eyebrow']} {rewritten['title1']} {rewritten['title2']} {rewritten['desc1']} {rewritten['desc2']}"
+    score = 0
 
     try:
         v = float(volume)
-        if v >= 20000000:
-            score += 36
-        elif v >= 10000000:
-            score += 30
-        elif v >= 5000000:
-            score += 24
-        elif v >= 2000000:
-            score += 18
-        elif v >= 500000:
-            score += 12
+        if v >= 15000000:
+            score += 34
+        elif v >= 8000000:
+            score += 28
+        elif v >= 4000000:
+            score += 22
+        elif v >= 1500000:
+            score += 16
     except:
         pass
 
     try:
         p = float(yes_price)
-        if 0.08 <= p <= 0.92:
+        if 0.10 <= p <= 0.90:
             score += 18
-        if 0.18 <= p <= 0.82:
-            score += 12
-        if 0.35 <= p <= 0.65:
-            score += 8
+        if 0.20 <= p <= 0.80:
+            score += 10
     except:
         pass
 
-    for w in MONEY_WORDS:
-        if w in text:
-            score += 15
+    for k in [
+        "bitcoin", "btc", "oil", "wti", "crude", "gold", "fed", "inflation",
+        "cpi", "yield", "tariff", "trump", "deal", "nasdaq"
+    ]:
+        if k in text:
+            score += 12
 
-    if any(w in text for w in ["iran", "war", "attack", "missile", "ceasefire"]) and not any(w in text for w in ["oil", "wti", "crude", "gold", "hormuz"]):
-        score -= 40
+    if is_surge:
+        score += 18
 
-    if any(w in output for w in ABSTRACT_BANNED):
-        score -= 20
-
-    if "%" in output:
-        score += 14
-
-    if any(k in output for k in ["거래", "억", "$", "유가", "금", "비트", "이더", "금리", "관세", "증시", "달러"]):
-        score += 20
+    if any(k in out for k in [
+        "늦으면", "또", "지갑", "숨멎", "벌써", "구경만", "들뜸",
+        "처맞음", "멘붕", "식은땀", "배아픔", "난리", "쫄림"
+    ]):
+        score += 16
 
     return score
 
 
 def build_news_candidate():
-    try:
-        title, summary = get_news()
-    except:
+    article = get_news_candidate()
+    if not article:
         return None
 
-    if not title:
-        return None
-
+    title = article["title"]
+    summary = article["description"]
     topic = classify_topic(title, summary)
+
     if topic not in ALLOWED_TOPICS:
         return None
 
-    text = f"{title} {summary}".lower()
-    if any(w in text for w in ["iran", "war", "attack", "missile", "ceasefire"]) and not any(w in text for w in ["oil", "wti", "crude", "gold", "hormuz"]):
-        return None
-
     mode = detect_news_mode(title, summary)
-    numbers = extract_numbers(f"{title} {summary}")
-    number_hint = choose_best_number(f"{title} {summary}", numbers)
+    rewritten = rewrite(title, summary, mode=mode)
 
-    rewritten = rewrite(title, summary, mode=mode, number_hint=number_hint)
-
-    if invalid_topic_shift(title, rewritten):
-        rewritten = rewrite(title, summary, mode=mode, number_hint=number_hint)
-
-    score = score_news_item(title, summary, mode, rewritten)
-
-    if score < 30:
+    score = score_news_candidate(title, summary, rewritten)
+    if score < NEWS_MIN_SCORE:
         return None
 
     return {
@@ -200,95 +183,53 @@ def build_news_candidate():
         "mode": mode,
         "topic": topic,
         "rewritten": rewritten,
-        "score": score
+        "score": score,
     }
 
 
-def _theme_key(question):
-    text = question.lower()
-
-    if any(k in text for k in ["oil", "wti", "crude", "brent", "hormuz", "strait"]):
+def rewritten_topic_key(question):
+    q = question.lower()
+    if any(k in q for k in ["bitcoin", "btc"]):
+        return "btc"
+    if any(k in q for k in ["ethereum", "eth"]):
+        return "eth"
+    if any(k in q for k in ["oil", "wti", "crude", "brent"]):
         return "oil"
-    if "gold" in text:
+    if "gold" in q:
         return "gold"
-    if any(k in text for k in ["bitcoin", "btc"]):
-        return "bitcoin"
-    if any(k in text for k in ["ethereum", "eth"]):
-        return "ethereum"
-    if any(k in text for k in ["fed", "inflation", "rate", "rates", "cpi", "yield", "treasury"]):
+    if any(k in q for k in ["fed", "rate", "inflation", "cpi", "yield", "treasury"]):
         return "macro"
-    if any(k in text for k in ["tariff", "china", "exports"]):
-        return "trade"
-    if any(k in text for k in ["nasdaq", "s&p", "dow", "stocks"]):
+    if any(k in q for k in ["trump", "deal", "tariff"]):
+        return "trump_trade"
+    if any(k in q for k in ["war", "attack", "ceasefire", "iran", "israel"]):
+        return "mideast"
+    if any(k in q for k in ["nasdaq", "s&p", "dow", "stocks"]):
         return "stocks"
-    if any(k in text for k in ["trump", "election", "president", "white house"]):
-        return "politics"
-    if any(k in text for k in ["iran", "war", "attack", "missile", "ceasefire"]):
-        return "geopolitics"
-    return "other"
-
-
-def _is_money_relevant(question, description=""):
-    text = f"{question} {description}".lower()
-    return any(k in text for k in MONEY_WORDS)
-
-
-def _is_publishable_poly(question, description, rewritten):
-    text = f"{question} {description}".lower()
-    out = f"{rewritten['title1']} {rewritten['title2']} {rewritten['desc1']} {rewritten['desc2']}"
-
-    if not _is_money_relevant(question, description):
-        return False
-
-    if any(w in out for w in ABSTRACT_BANNED):
-        return False
-
-    if any(w in text for w in ["iran", "war", "attack", "missile", "ceasefire"]) and not any(k in text for k in ["oil", "wti", "crude", "gold", "hormuz"]):
-        return False
-
-    if "%" not in out:
-        return False
-
-    if not any(k in out for k in ["거래", "억", "$", "유가", "금", "비트", "이더", "금리", "관세", "증시", "달러"]):
-        return False
-
-    return True
+    return "general"
 
 
 def build_poly_candidates():
-    markets = get_polymarket_markets(limit=150)
-    excluded_titles = set(load_history())
+    markets = get_polymarket_markets(limit=180)
     candidates = []
-    theme_seen = set()
+    seen_topics = set()
 
-    ranked = sorted(markets, key=lambda m: m.get("_score", 0), reverse=True)
-
-    for market in ranked[:50]:
+    for market in markets[:80]:
         question = market["question"]
-        if question in excluded_titles:
-            continue
+        description = market.get("description", "")
+        topic = classify_topic(question, description)
 
-        topic = classify_topic(question, market.get("description", ""))
         if topic not in ALLOWED_TOPICS:
             continue
 
-        theme = _theme_key(question)
-        if theme in theme_seen:
+        if is_duplicate(question):
             continue
 
-        surge = detect_surge(
-            question=question,
-            volume=market["volume"],
-            yes_price=market["yes_price"]
-        )
+        theme = rewritten_topic_key(question)
+        if theme in seen_topics:
+            continue
 
-        mode = detect_poly_mode(
-            question=question,
-            yes_price=market["yes_price"],
-            topic=topic,
-            is_surge=surge
-        )
-
+        surge = detect_surge(question=question, volume=market["volume"], yes_price=market["yes_price"])
+        mode = detect_poly_mode(question, topic, is_surge=surge)
         rewritten = rewrite_poly(
             question=question,
             volume=market["volume"],
@@ -296,37 +237,24 @@ def build_poly_candidates():
             end_date=market["end_date"]
         )
 
-        if not _is_publishable_poly(question, market.get("description", ""), rewritten):
+        score = score_poly_candidate(question, market["volume"], market["yes_price"], rewritten, is_surge=surge)
+        if score < POLY_MIN_SCORE:
             continue
-
-        score = score_poly_item(
-            question,
-            market["volume"],
-            market["yes_price"],
-            mode,
-            rewritten,
-            is_surge=surge
-        )
-
-        raw_summary = (
-            f"volume={market['volume']}, yes={market['yes_price']}, "
-            f"end={market['end_date']}, desc={market.get('description', '')}"
-        )
 
         candidates.append({
             "source": "polymarket",
             "raw_title": question,
-            "raw_summary": raw_summary,
+            "raw_summary": description,
             "mode": mode,
             "topic": topic,
-            "theme": theme,
             "rewritten": rewritten,
             "score": score,
             "volume": market["volume"],
             "yes_price": market["yes_price"],
-            "is_surge": surge
+            "end_date": market["end_date"],
+            "is_surge": surge,
         })
-        theme_seen.add(theme)
+        seen_topics.add(theme)
 
         if len(candidates) >= 12:
             break
@@ -335,55 +263,31 @@ def build_poly_candidates():
     return candidates
 
 
-def is_usable_candidate(candidate, ignore_topic=False):
-    title = candidate["raw_title"]
-    topic = candidate["topic"]
-
-    if is_duplicate(title):
-        print("중복 제목 스킵:", title)
-        return False
-
-    if candidate["source"] == "polymarket" and candidate.get("score", 0) < 58:
-        print("점수 부족 스킵:", candidate["score"], "/", title)
-        return False
-
-    if not ignore_topic and is_same_topic(topic):
-        if candidate.get("score", 0) < 88:
-            print("같은 주제 스킵:", topic, "/", title)
-            return False
-
-    return True
-
-
 def choose_winner():
-    poly_candidates = build_poly_candidates()
-
-    if poly_candidates:
-        print("폴리마켓 상위 점수:", [c["score"] for c in poly_candidates[:5]])
-    else:
-        print("폴리마켓 후보 없음")
-
-    usable_poly = None
-    for candidate in poly_candidates:
-        if is_usable_candidate(candidate, ignore_topic=False):
-            usable_poly = candidate
-            break
-
-    if not usable_poly:
-        for candidate in poly_candidates:
-            if is_usable_candidate(candidate, ignore_topic=True):
-                usable_poly = candidate
-                print("주제 필터 완화로 선택:", candidate["raw_title"])
-                break
-
-    if usable_poly:
-        return usable_poly
-
     news_candidate = build_news_candidate()
-    if news_candidate:
-        print("뉴스 점수:", news_candidate["score"])
-        if is_usable_candidate(news_candidate, ignore_topic=True):
+    poly_candidates = build_poly_candidates()
+    best_poly = poly_candidates[0] if poly_candidates else None
+    bias = source_bias()
+
+    if bias == "news_strong" and news_candidate:
+        return news_candidate
+
+    if bias == "news_preferred" and news_candidate:
+        if best_poly is None or news_candidate["score"] >= best_poly["score"] - 4:
             return news_candidate
+
+    if news_candidate and best_poly:
+        if news_candidate["score"] >= best_poly["score"] + 5:
+            return news_candidate
+        if best_poly["score"] >= news_candidate["score"] + 12:
+            return best_poly
+        return random.choice([news_candidate, best_poly])
+
+    if news_candidate:
+        return news_candidate
+
+    if best_poly:
+        return best_poly
 
     return None
 
@@ -395,25 +299,22 @@ def run():
         print("보낼 후보 없음 → 종료")
         return
 
-    title = winner["raw_title"]
+    if is_duplicate(winner["raw_title"]):
+        print("중복 제목 스킵:", winner["raw_title"])
+        return
+
+    if is_same_topic(winner["topic"]) and winner["score"] < 86:
+        print("같은 주제 스킵:", winner["topic"], "/", winner["raw_title"])
+        return
 
     print("선택 소스:", winner["source"])
     print("원본:", winner["raw_title"])
-    print("모드:", winner["mode"])
-    print("주제:", winner["topic"])
+    print("점수:", winner["score"])
+    print("아이브로:", winner["rewritten"].get("eyebrow", ""))
     print("제목1:", winner["rewritten"]["title1"])
     print("제목2:", winner["rewritten"]["title2"])
     print("설명1:", winner["rewritten"]["desc1"])
     print("설명2:", winner["rewritten"]["desc2"])
-
-    safe_generate_bg(
-        raw_title=winner["raw_title"],
-        raw_summary=winner["raw_summary"],
-        mode=winner["mode"],
-        source=winner["source"],
-        topic=winner["topic"],
-        output_path="bg.jpg"
-    )
 
     path = create_card(winner["rewritten"], mode=winner["mode"])
     send_image(path)
@@ -425,8 +326,9 @@ def run():
             yes_price=winner.get("yes_price", 0)
         )
 
-    add_history(title)
+    add_history(winner["raw_title"])
     add_topic(winner["topic"])
+    add_mix(winner["source"])
 
     print("전송 완료")
 
