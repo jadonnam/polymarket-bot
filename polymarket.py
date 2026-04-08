@@ -19,10 +19,17 @@ POPULAR_KEYWORDS = [
     "oil", "wti", "crude", "gold", "bitcoin", "btc", "ethereum", "eth",
     "fed", "inflation", "rate", "recession", "economy", "s&p 500", "nasdaq",
     "dow", "trump", "election", "president", "white house", "china", "russia",
-    "taiwan", "us ", "u.s.", "american"
+    "taiwan", "us ", "u.s.", "american", "tariff", "hormuz", "strait"
 ]
 
 LOW_QUALITY_WORDS = ["will", "vs", "win", "match", "game"]
+ABSTRACT_WORDS = ["tension", "fear", "sentiment", "anxiety", "uncertainty", "concern", "panic"]
+MONEY_WORDS = [
+    "oil", "wti", "crude", "brent", "gold", "bitcoin", "btc", "ethereum", "eth",
+    "fed", "inflation", "rate", "rates", "tariff", "s&p 500", "nasdaq", "dow",
+    "economy", "recession", "dollar", "won", "hormuz", "strait", "stocks"
+]
+
 
 def parse_outcome_prices(raw):
     if raw is None:
@@ -66,6 +73,7 @@ def parse_outcome_prices(raw):
 
     return []
 
+
 def parse_outcomes(raw):
     if raw is None:
         return []
@@ -87,11 +95,13 @@ def parse_outcomes(raw):
 
     return []
 
+
 def parse_float(value, default=0.0):
     try:
         return float(value)
     except:
         return default
+
 
 def pick_yes_price(market):
     prices = parse_outcome_prices(market.get("outcomePrices"))
@@ -106,6 +116,7 @@ def pick_yes_price(market):
         return prices[0]
 
     return 0.0
+
 
 def pick_volume(market):
     candidates = [
@@ -125,12 +136,14 @@ def pick_volume(market):
 
     return 0.0
 
+
 def pick_end_date(market):
     for key in ["endDate", "end_date", "resolutionDate", "closeTime", "closedTime"]:
         value = market.get(key)
         if value:
             return str(value)
     return ""
+
 
 def parse_datetime_safe(value):
     if not value:
@@ -164,6 +177,7 @@ def parse_datetime_safe(value):
 
     return None
 
+
 def is_market_resolved_or_closed(market):
     for key in ["closed", "resolved", "archived"]:
         value = market.get(key)
@@ -181,6 +195,7 @@ def is_market_resolved_or_closed(market):
         return True
 
     return False
+
 
 def question_has_expired_date(question):
     if not question:
@@ -203,6 +218,7 @@ def question_has_expired_date(question):
     except:
         return False
 
+
 def is_market_expired(market):
     end_date = pick_end_date(market)
     dt = parse_datetime_safe(end_date)
@@ -216,6 +232,7 @@ def is_market_expired(market):
 
     return False
 
+
 def classify_topic(title, description=""):
     text = f"{title} {description}".lower()
 
@@ -226,16 +243,28 @@ def classify_topic(title, description=""):
         return "geopolitics"
     if any(k in text for k in ["trump", "election", "president", "white house", "campaign", "vote", "senate", "gavin newsom"]):
         return "politics"
-    if any(k in text for k in ["fed", "inflation", "rate", "recession", "economy", "stocks", "oil", "gold", "s&p 500", "nasdaq", "dow", "wti", "crude", "strait of hormuz", "hormuz"]):
+    if any(k in text for k in ["fed", "inflation", "rate", "recession", "economy", "stocks", "oil", "gold", "s&p 500", "nasdaq", "dow", "wti", "crude", "strait of hormuz", "hormuz", "tariff"]):
         return "economy"
     if any(k in text for k in ["bitcoin", "btc", "ethereum", "eth", "crypto", "solana"]):
         return "crypto"
 
     return "general"
 
+
 def is_popular_market(question, description=""):
     text = f"{question} {description}".lower()
     return any(k in text for k in POPULAR_KEYWORDS)
+
+
+def is_money_market(question, description=""):
+    text = f"{question} {description}".lower()
+    return any(k in text for k in MONEY_WORDS)
+
+
+def is_abstract_only_market(question, description=""):
+    text = f"{question} {description}".lower()
+    return any(w in text for w in ABSTRACT_WORDS) and not is_money_market(question, description)
+
 
 def is_valid_market(market):
     if is_market_resolved_or_closed(market):
@@ -261,10 +290,16 @@ def is_valid_market(market):
     if any(w in question.lower() for w in LOW_QUALITY_WORDS):
         return False
 
+    if is_abstract_only_market(question, description):
+        return False
+
+    if not is_money_market(question, description):
+        return False
+
     yes_price = pick_yes_price(market)
     volume = pick_volume(market)
 
-    if volume <= 50000:
+    if volume <= 100000:
         return False
 
     if yes_price < 0 or yes_price > 1:
@@ -274,6 +309,7 @@ def is_valid_market(market):
         return False
 
     return True
+
 
 def market_score(market):
     yes_price = pick_yes_price(market)
@@ -288,20 +324,26 @@ def market_score(market):
     if 0.05 < yes_price < 0.95:
         score += 40
 
-    if topic == "geopolitics":
-        score += 30
-    elif topic == "economy":
-        score += 22
+    if topic == "economy":
+        score += 40
     elif topic == "crypto":
-        score += 16
+        score += 30
     elif topic == "politics":
-        score += 10
+        score += 15
+    elif topic == "geopolitics":
+        score += 8
 
-    for word in ["iran", "war", "attack", "missile", "military", "troops", "oil", "gold", "bitcoin", "fed", "wti", "crude", "trump"]:
-        if word in question:
-            score += 15
+    if is_money_market(question, description):
+        score += 35
+
+    if any(word in question for word in ["oil", "wti", "crude", "gold", "bitcoin", "btc", "fed", "inflation", "tariff", "nasdaq", "s&p", "dow"]):
+        score += 25
+
+    if any(word in question for word in ["iran", "war", "attack", "missile", "ceasefire"]) and not any(word in question for word in ["oil", "wti", "crude", "gold", "hormuz"]):
+        score -= 30
 
     return score
+
 
 def get_polymarket_markets(limit=80):
     params = {
@@ -320,6 +362,7 @@ def get_polymarket_markets(limit=80):
         return []
 
     return [m for m in data if is_valid_market(m)]
+
 
 def parse_best_market(markets, excluded_titles=None):
     if not markets:
@@ -346,6 +389,7 @@ def parse_best_market(markets, excluded_titles=None):
         }
 
     raise Exception("No non-duplicate market data")
+
 
 def get_top_market(excluded_titles=None):
     markets = get_polymarket_markets(limit=80)
