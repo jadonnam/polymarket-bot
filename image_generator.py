@@ -4,64 +4,85 @@ from openai import OpenAI
 
 client = OpenAI(api_key=(os.getenv("OPENAI_API_KEY") or "").strip())
 
-def build_prompt(raw_title="", raw_summary="", mode="normal", source="news", topic="general"):
-    title = raw_title
-    summary = raw_summary
 
-    if topic == "geopolitics":
-        return f"""
-Real breaking news photo.
+def classify_visual_topic(raw_title="", raw_summary="", topic="general"):
+    text = f"{raw_title} {raw_summary}".lower()
 
-Topic:
-{title}
+    if any(k in text for k in ["oil", "wti", "crude", "brent", "hormuz", "tanker", "refinery", "lng"]):
+        return "oil"
+    if any(k in text for k in ["gold", "bullion", "safe haven"]):
+        return "gold"
+    if any(k in text for k in ["bitcoin", "btc", "crypto", "ethereum", "eth"]):
+        return "crypto"
+    if any(k in text for k in ["fed", "inflation", "cpi", "rate", "rates", "bond", "yield", "tariff", "nasdaq", "s&p", "dow", "treasury"]):
+        return "macro"
+    if any(k in text for k in ["iran", "israel", "missile", "war", "attack", "ceasefire", "troops"]):
+        return "geopolitics"
 
-Context:
-{summary}
+    if topic in ["economy", "crypto", "geopolitics", "politics"]:
+        return topic
 
-Scene:
-- conflict zone, civilians running
-- smoke, destroyed street, damaged vehicles
-- military presence in distance
-- NO close-up face
-- NO single person portrait
-- NO politician portrait
-- focus on situation, not a famous person
-- messy real-world environment
-- not staged
+    return "general"
 
-Camera:
-- handheld documentary camera
-- slight motion blur
-- imperfect focus
-- grainy realism
 
-Lighting:
-- natural light only
-- uneven exposure
+def build_common_rules():
+    return """
+STYLE:
+- real editorial news photo
+- realistic documentary photography
+- natural imperfections
+- slightly grainy
+- not cinematic
+- not glossy ad style
+- not illustration
+- not 3d render
+- not infographic
+- not poster
+- not AI art look
 
-Composition:
-- subject or action on right
-- left side dark and empty for headline
+COMPOSITION:
+- main subject on right side
+- left 45 percent must stay dark, clean, empty
+- strong negative space on left for Korean headline
+- avoid clutter on left
+- one clear subject only
+- mobile first vertical composition for Instagram card
+- visually premium, clean, expensive looking
 
-STRICT:
-- no text
+LIGHTING:
+- realistic ambient light only
+- subtle contrast
+- moody but clean
+- no blown highlights
+
+STRICTLY FORBIDDEN:
+- no readable text
 - no letters
 - no words
 - no numbers
-- no logo
-- no watermark
+- no ticker symbols
+- no subtitles
+- no captions
 - no signage
-- no billboards
-- no posters
+- no logos
+- no watermarks
 - no newspaper front pages
-- not cinematic
-- not illustration
-- not AI style
+- no screenshots
+- no UI
+- no app interface
+- no giant face close-up
+- no politician portrait
+- no duplicated objects
+- no duplicated ships
+- no duplicated monitors
+- no extra fingers
+- no surreal shapes
 """.strip()
 
-    if topic == "economy":
-        return f"""
-Real financial news photo.
+
+def build_oil_prompt(title="", summary=""):
+    return f"""
+Real financial news photo about oil market.
 
 Topic:
 {title}
@@ -70,46 +91,31 @@ Context:
 {summary}
 
 Scene:
-- oil tanker, port, shipping route, refinery, financial district, or trading floor
-- blurred charts or market screens in background only
-- economic tension atmosphere
-- NO war
-- NO soldier
-- NO weapon
-- NO explosion
-- NO conflict zone
-- NO politician face
-- NO close-up face
-- no giant portrait in foreground
-- realistic editorial environment
-- not staged
+- one large crude oil tanker or LNG tanker near port, refinery, or narrow shipping route
+- industrial energy infrastructure in distance
+- realistic sea haze, refinery lights, pipelines
+- premium editorial mood
+- no explosion
+- no war scene
+- no soldiers
+- no missile
+- no fireball
+- no dramatic destruction
+- focus on oil supply and price shock atmosphere
 
 Camera:
-- documentary style camera
+- telephoto documentary shot
 - slight grain
-- realistic imperfections
+- realistic lens softness
+- natural depth
 
-Lighting:
-- natural light or office ambient light only
-
-Composition:
-- main subject on right
-- left side dark and empty for headline
-
-STRICT:
-- no readable text
-- no letters
-- no words
-- no logo
-- no watermark
-- not cinematic
-- not illustration
-- not AI style
+{build_common_rules()}
 """.strip()
 
-    if topic == "crypto":
-        return f"""
-Real crypto market photo.
+
+def build_gold_prompt(title="", summary=""):
+    return f"""
+Real financial news photo about gold market.
 
 Topic:
 {title}
@@ -118,44 +124,27 @@ Context:
 {summary}
 
 Scene:
-- trader desk, finance workspace, digital asset market tension
-- monitors in background but unreadable
-- investors or analysts at work
-- NO war
-- NO soldier
-- NO weapon
-- NO explosion
-- NO politician
-- NO close-up face
-- realistic editorial style
-- not staged
+- gold bars, vault trays, precious metals desk, macro finance environment
+- safe haven asset mood
+- maybe blurred market lights in deep background only
+- no readable screen text
+- no people close-up
+- no war scene
+- no politician
+- elegant but realistic editorial image
 
 Camera:
-- handheld documentary camera
-- slight grain
-- imperfect focus
+- documentary financial photography
+- subtle grain
+- realistic focus falloff
 
-Lighting:
-- realistic indoor light only
-
-Composition:
-- main subject on right
-- left side dark and empty for headline
-
-STRICT:
-- no readable text
-- no letters
-- no words
-- no logo
-- no watermark
-- not cinematic
-- not illustration
-- not AI style
+{build_common_rules()}
 """.strip()
 
-    if topic == "politics":
-        return f"""
-Real political news photo.
+
+def build_crypto_prompt(title="", summary=""):
+    return f"""
+Real financial news photo about crypto market.
 
 Topic:
 {title}
@@ -164,38 +153,93 @@ Context:
 {summary}
 
 Scene:
-- press crowd, government building, campaign event atmosphere, public event
-- people moving, cameras, security presence
-- NO giant face close-up
-- NO celebrity portrait
-- NO poster text
-- NO campaign sign text
-- realistic documentary atmosphere
-- not staged
+- one trader workspace, one desk, one monitor cluster
+- dark finance room
+- digital asset trading atmosphere
+- charts only as blurred abstract light shapes
+- no readable monitor content
+- no coin logos
+- no bitcoin logo
+- no ethereum logo
+- no app screens
+- no giant 3d coins
+- no cyberpunk style
+- realistic premium editorial look
 
 Camera:
 - handheld documentary camera
 - slight grain
-- imperfect focus
+- realistic indoor light
+- sharp subject on right, empty dark left
 
-Lighting:
-- natural light only
-
-Composition:
-- main subject or event on right
-- left side dark and empty for headline
-
-STRICT:
-- no readable text
-- no letters
-- no words
-- no logo
-- no watermark
-- not cinematic
-- not illustration
-- not AI style
+{build_common_rules()}
 """.strip()
 
+
+def build_macro_prompt(title="", summary=""):
+    return f"""
+Real financial news photo about macroeconomy.
+
+Topic:
+{title}
+
+Context:
+{summary}
+
+Scene:
+- financial district, bond trading room, stock exchange floor, cargo port, container terminal, or central bank style environment
+- blurred market activity in background
+- no readable data screens
+- no politician portrait
+- no war scene
+- no flags dominating image
+- focus on money flow and economic pressure
+- clean premium composition
+
+Camera:
+- documentary editorial photography
+- natural office or city light
+- slight grain
+- expensive clean visual
+
+{build_common_rules()}
+""".strip()
+
+
+def build_geopolitics_prompt(title="", summary=""):
+    return f"""
+Real news photo connected to geopolitical risk affecting markets.
+
+Topic:
+{title}
+
+Context:
+{summary}
+
+Scene:
+- oil terminal, port security zone, shipping chokepoint, industrial coastline, surveillance atmosphere
+- if tension is implied, show infrastructure risk rather than combat
+- distant security presence only if needed
+- no active firefight
+- no blood
+- no bodies
+- no battlefield
+- no giant politician face
+- no protest signs
+- focus on market relevant geopolitical risk, not war drama
+
+Camera:
+- documentary press photo
+- slight grain
+- imperfect realism
+- dark clean left side
+- subject on right
+
+{build_common_rules()}
+""".strip()
+
+
+def build_general_prompt(title="", summary=""):
     return f"""
 Real news photo.
 
@@ -206,32 +250,38 @@ Context:
 {summary}
 
 Scene:
-- realistic current event setting
-- subtle urgency
-- no giant face
-- no close-up portrait
-- documentary realism
-- not staged
+- current events editorial environment
+- money and market relevance
+- clean dark negative space on left
+- realistic subject on right
+- premium visual mood
+- no literal text elements
 
 Camera:
-- handheld
+- documentary photography
 - slight grain
-- imperfect focus
+- realistic imperfections
 
-Composition:
-- subject on right
-- left side dark empty space
-
-STRICT:
-- no readable text
-- no letters
-- no words
-- no logo
-- no watermark
-- not cinematic
-- not illustration
-- not AI style
+{build_common_rules()}
 """.strip()
+
+
+def build_prompt(raw_title="", raw_summary="", mode="normal", source="news", topic="general"):
+    visual_topic = classify_visual_topic(raw_title, raw_summary, topic)
+
+    if visual_topic == "oil":
+        return build_oil_prompt(raw_title, raw_summary)
+    if visual_topic == "gold":
+        return build_gold_prompt(raw_title, raw_summary)
+    if visual_topic == "crypto":
+        return build_crypto_prompt(raw_title, raw_summary)
+    if visual_topic == "macro":
+        return build_macro_prompt(raw_title, raw_summary)
+    if visual_topic == "geopolitics":
+        return build_geopolitics_prompt(raw_title, raw_summary)
+
+    return build_general_prompt(raw_title, raw_summary)
+
 
 def generate_bg(raw_title="", raw_summary="", mode="normal", source="news", topic="general", output_path="bg.jpg"):
     prompt = build_prompt(raw_title, raw_summary, mode, source, topic)
@@ -251,6 +301,7 @@ def generate_bg(raw_title="", raw_summary="", mode="normal", source="news", topi
 
     print(f"bg saved: {output_path}")
     return output_path
+
 
 def safe_generate_bg(raw_title="", raw_summary="", mode="normal", source="news", topic="general", output_path="bg.jpg"):
     try:

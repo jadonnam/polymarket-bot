@@ -16,10 +16,11 @@ SPORTS_KEYWORDS = [
 
 POPULAR_KEYWORDS = [
     "iran", "war", "attack", "missile", "ceasefire", "regime", "israel",
-    "oil", "wti", "crude", "gold", "bitcoin", "btc", "ethereum", "eth",
+    "oil", "wti", "crude", "brent", "gold", "bitcoin", "btc", "ethereum", "eth",
     "fed", "inflation", "rate", "recession", "economy", "s&p 500", "nasdaq",
     "dow", "trump", "election", "president", "white house", "china", "russia",
-    "taiwan", "us ", "u.s.", "american", "tariff", "hormuz", "strait"
+    "taiwan", "us ", "u.s.", "american", "tariff", "hormuz", "strait",
+    "yield", "treasury", "stocks", "cpi"
 ]
 
 LOW_QUALITY_WORDS = ["will", "vs", "win", "match", "game"]
@@ -27,7 +28,8 @@ ABSTRACT_WORDS = ["tension", "fear", "sentiment", "anxiety", "uncertainty", "con
 MONEY_WORDS = [
     "oil", "wti", "crude", "brent", "gold", "bitcoin", "btc", "ethereum", "eth",
     "fed", "inflation", "rate", "rates", "tariff", "s&p 500", "nasdaq", "dow",
-    "economy", "recession", "dollar", "won", "hormuz", "strait", "stocks"
+    "economy", "recession", "dollar", "won", "hormuz", "strait", "stocks",
+    "yield", "treasury", "cpi"
 ]
 
 
@@ -243,7 +245,7 @@ def classify_topic(title, description=""):
         return "geopolitics"
     if any(k in text for k in ["trump", "election", "president", "white house", "campaign", "vote", "senate", "gavin newsom"]):
         return "politics"
-    if any(k in text for k in ["fed", "inflation", "rate", "recession", "economy", "stocks", "oil", "gold", "s&p 500", "nasdaq", "dow", "wti", "crude", "strait of hormuz", "hormuz", "tariff"]):
+    if any(k in text for k in ["fed", "inflation", "rate", "recession", "economy", "stocks", "oil", "gold", "s&p 500", "nasdaq", "dow", "wti", "crude", "strait of hormuz", "hormuz", "tariff", "yield", "treasury", "cpi"]):
         return "economy"
     if any(k in text for k in ["bitcoin", "btc", "ethereum", "eth", "crypto", "solana"]):
         return "crypto"
@@ -280,7 +282,6 @@ def is_valid_market(market):
         return False
 
     topic = classify_topic(question, description)
-
     if topic not in ALLOWED_TOPICS:
         return False
 
@@ -299,13 +300,16 @@ def is_valid_market(market):
     yes_price = pick_yes_price(market)
     volume = pick_volume(market)
 
-    if volume <= 100000:
+    if volume <= 150000:
         return False
 
     if yes_price < 0 or yes_price > 1:
         return False
 
     if yes_price > 0.97 or yes_price < 0.03:
+        return False
+
+    if any(k in question.lower() for k in ["iran", "war", "attack", "missile", "ceasefire"]) and not any(k in f"{question} {description}".lower() for k in ["oil", "wti", "crude", "gold", "hormuz"]):
         return False
 
     return True
@@ -319,13 +323,15 @@ def market_score(market):
     topic = classify_topic(question, description)
 
     score = 0
-    score += min(volume / 100000, 300)
+    score += min(volume / 100000, 320)
 
     if 0.05 < yes_price < 0.95:
         score += 40
+    if 0.18 < yes_price < 0.82:
+        score += 15
 
     if topic == "economy":
-        score += 40
+        score += 42
     elif topic == "crypto":
         score += 30
     elif topic == "politics":
@@ -334,18 +340,19 @@ def market_score(market):
         score += 8
 
     if is_money_market(question, description):
-        score += 35
+        score += 36
 
-    if any(word in question for word in ["oil", "wti", "crude", "gold", "bitcoin", "btc", "fed", "inflation", "tariff", "nasdaq", "s&p", "dow"]):
-        score += 25
+    for word in ["oil", "wti", "crude", "brent", "gold", "bitcoin", "btc", "ethereum", "eth", "fed", "inflation", "tariff", "nasdaq", "s&p", "dow", "yield", "treasury", "cpi", "hormuz"]:
+        if word in question:
+            score += 20
 
     if any(word in question for word in ["iran", "war", "attack", "missile", "ceasefire"]) and not any(word in question for word in ["oil", "wti", "crude", "gold", "hormuz"]):
-        score -= 30
+        score -= 40
 
     return score
 
 
-def get_polymarket_markets(limit=80):
+def get_polymarket_markets(limit=150):
     params = {
         "limit": limit,
         "active": "true",
@@ -361,7 +368,23 @@ def get_polymarket_markets(limit=80):
     if not isinstance(data, list):
         return []
 
-    return [m for m in data if is_valid_market(m)]
+    valid = []
+    for m in data:
+        if not is_valid_market(m):
+            continue
+
+        item = {
+            "question": m.get("question", "Unknown Market"),
+            "volume": pick_volume(m),
+            "yes_price": pick_yes_price(m),
+            "end_date": pick_end_date(m),
+            "description": m.get("description", "") or ""
+        }
+        item["_score"] = market_score(m)
+        valid.append(item)
+
+    valid.sort(key=lambda x: x["_score"], reverse=True)
+    return valid
 
 
 def parse_best_market(markets, excluded_titles=None):
@@ -369,30 +392,19 @@ def parse_best_market(markets, excluded_titles=None):
         raise Exception("No valid market data")
 
     excluded_titles = set(excluded_titles or [])
-    ranked = sorted(markets, key=market_score, reverse=True)
+    ranked = sorted(markets, key=lambda x: x.get("_score", 0), reverse=True)
 
     for m in ranked:
         question = m.get("question", "Unknown Market")
         if question in excluded_titles:
             continue
-
-        yes_price = pick_yes_price(m)
-        volume = pick_volume(m)
-        end_date = pick_end_date(m)
-
-        return {
-            "question": question,
-            "volume": volume,
-            "yes_price": yes_price,
-            "end_date": end_date,
-            "description": m.get("description", "") or ""
-        }
+        return m
 
     raise Exception("No non-duplicate market data")
 
 
 def get_top_market(excluded_titles=None):
-    markets = get_polymarket_markets(limit=80)
+    markets = get_polymarket_markets(limit=150)
     best = parse_best_market(markets, excluded_titles=excluded_titles)
 
     probability_text = f"{int(round(parse_float(best['yes_price']) * 100))}%"
