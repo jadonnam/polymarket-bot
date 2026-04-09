@@ -5,8 +5,8 @@ image_generator_new + card_maker_new 연결
 """
 
 import re
-from card_maker_final import make_card, make_carousel_set, split_highlight, ACCENTS
-from image_generator_final import safe_generate_bg, generate_carousel_bgs
+from card_maker_v3 import make_card, make_carousel_set, split_highlight, ACCENTS
+from image_generator_new import safe_generate_bg, generate_carousel_bgs
 
 
 def create_card(rewritten, mode="normal"):
@@ -38,8 +38,8 @@ def create_card(rewritten, mode="normal"):
         title1_parts=title1_parts,
         title2_parts=title2_parts,
         desc_lines=[rewritten["desc1"], rewritten["desc2"]],
-        brand_text="jadonnam",
-        topic_label=rewritten.get("topic", "MARKET"),
+        brand_text="",
+        topic_label="",
         mode=mode,
         accent=accent,
         data_bar=data_bar,

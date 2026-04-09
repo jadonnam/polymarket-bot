@@ -65,7 +65,7 @@ def get_prices_for_topic(topic):
             return {
                 "usd": f"${price}",
                 "desc1": f"WTI 현재 배럴당 {price}달러",
-                "desc2": f"국내 리터당 약 {int(krw_price)}원에 영향 줍니다",
+                "desc2": f"국내 리터당 약 {int(krw_price)}원에 영향을 줍니다",
             }
 
     elif topic == "BTC":
@@ -76,7 +76,7 @@ def get_prices_for_topic(topic):
             return {
                 "usd": f"${price:,}",
                 "desc1": f"비트코인 현재 {price:,}달러",
-                "desc2": f"원화 기준 약 {krw_price}억원입니다",
+                "desc2": f"원화 기준 약 {krw_price}억원",
             }
 
     elif topic == "GOLD":
@@ -85,7 +85,7 @@ def get_prices_for_topic(topic):
             return {
                 "usd": f"${price}",
                 "desc1": f"금 현물 온스당 {price}달러",
-                "desc2": f"연초 대비 흐름을 같이 보면 좋습니다",
+                "desc2": f"연초 대비 흐름이 중요하다",
             }
 
     elif topic in ("RATE", "TRUMP", "GENERAL"):

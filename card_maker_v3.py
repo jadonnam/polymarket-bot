@@ -210,9 +210,11 @@ def make_card(
     draw = ImageDraw.Draw(bg_rgba)
 
     # ── 상단: 브랜드 + 토픽 칩만 ──────────────────────────
-    font_brand = get_font(REG_FONT, 32)
-    draw.text((MARGIN_L, BRAND_Y), brand_text, font=font_brand, fill=GRAY_LIGHT)
-    draw_chip(draw, MARGIN_L, CHIP_Y, topic_label, accent_color)
+    if brand_text:
+        font_brand = get_font(REG_FONT, 32)
+        draw.text((MARGIN_L, BRAND_Y), brand_text, font=font_brand, fill=GRAY_LIGHT)
+    if topic_label:
+        draw_chip(draw, MARGIN_L, CHIP_Y, topic_label, accent_color)
 
     # ── 하단 텍스트 블록 ───────────────────────────────────
     # 아이브로
@@ -293,9 +295,9 @@ def make_carousel_set(rewritten, mode="normal", bg_paths=None):
         shutil.copy(bg_paths[1], "bg.jpg")
 
     p2 = make_card(
-        eyebrow="이게 핵심이다",
+        eyebrow="핵심은 이 부분입니다",
         title1_parts=split_highlight(rewritten.get("card2_title1", "지금 숫자 보면"), accent_color),
-        title2_parts=[(rewritten.get("card2_title2", "이 숫자가 왜 중요한지 보인다"), WHITE)],
+        title2_parts=[(rewritten.get("card2_title2", "왜 중요한지 바로 보입니다"), WHITE)],
         desc_lines=[rewritten["desc1"], rewritten["desc2"]],
         brand_text="jadonnam",
         topic_label=topic,
@@ -311,12 +313,12 @@ def make_carousel_set(rewritten, mode="normal", bg_paths=None):
         shutil.copy(bg_paths[2], "bg.jpg")
 
     p3 = make_card(
-        eyebrow=rewritten.get("card3_hook", "결국 이 흐름은"),
-        title1_parts=[(rewritten.get("card3_title", "내 지갑과 연결된다"), WHITE)],
-        title2_parts=[("→ 저장하고 흐름 보기", accent_color)],
+        eyebrow=rewritten.get("card3_hook", "이 흐름은 결국 돈과 연결됩니다"),
+        title1_parts=[(rewritten.get("card3_title", "결국 내 지갑과 연결됩니다"), WHITE)],
+        title2_parts=[("→ 저장해두면 흐름이 보입니다", accent_color)],
         desc_lines=[
-            rewritten.get("card3_desc1", "핵심 숫자를 계속 비교해보는 편이 좋다"),
-            rewritten.get("card3_desc2", "저장해두면 다음 이슈와 연결해서 보기 쉽다"),
+            rewritten.get("card3_desc1", "핵심 숫자를 함께 보면 흐름이 더 잘 보입니다"),
+            rewritten.get("card3_desc2", "저장해두면 다음 이슈와 비교해서 보기 좋습니다"),
         ],
         brand_text="jadonnam",
         topic_label=topic,

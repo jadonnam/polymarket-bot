@@ -1,15 +1,24 @@
+"""
+instagram_v2.py — Instagram Graph API 자동 업로드 (CTA 강화)
+
+필요한 환경변수:
+- INSTAGRAM_ACCESS_TOKEN
+- INSTAGRAM_ACCOUNT_ID
+- IMGBB_API_KEY (imgbb.com 무료 발급)
+"""
+
 import os
 import time
 import base64
-import hashlib
 import requests
 
 ACCESS_TOKEN = os.getenv("INSTAGRAM_ACCESS_TOKEN", "")
-ACCOUNT_ID = os.getenv("INSTAGRAM_ACCOUNT_ID", "")
+ACCOUNT_ID   = os.getenv("INSTAGRAM_ACCOUNT_ID", "")
 IMGBB_API_KEY = os.getenv("IMGBB_API_KEY", "")
 
 GRAPH_URL = "https://graph.facebook.com/v19.0"
 
+# ── 토픽별 해시태그 ──────────────────────────────────────────
 HASHTAGS = {
     "OIL":     "#유가 #기름값 #원유 #wti #물가 #경제뉴스 #재테크 #돈공부 #경제정보 #투자공부",
     "BTC":     "#비트코인 #코인 #bitcoin #암호화폐 #가상화폐 #코인투자 #재테크 #돈공부 #코인시장",
@@ -26,51 +35,43 @@ HASHTAGS = {
     "GENERAL": "#경제뉴스 #재테크 #돈공부 #시장분석 #투자 #경제정보 #머니",
 }
 
+# ── 토픽별 CTA (저장/댓글 유도) ─────────────────────────────
 CTA_LINES = {
     "OIL": [
-        "저장해두면 다음 유가 뉴스와 비교해서 보기 쉽다",
-        "유가 이슈는 체감이 늦어도 돈은 먼저 움직인다",
-        "기름값 뉴스는 결국 생활비와 연결된다",
+        "저장해두면 다음 유가 흐름을 볼 때 도움됩니다",
+        "유가 뉴스는 생활비와 연결되니 저장해두는 편이 좋습니다",
+        "이런 흐름은 계속 체크하는 편이 좋습니다",
     ],
     "BTC": [
-        "비트 흐름은 코인판 전체 분위기를 읽는 데 도움됩니다",
-        "코인을 하는 사람은 저장해두면 방향 체크에 유리하다",
-        "숫자를 함께 보면 감정 매매를 줄이기 쉽다",
-    ],
-    "ETH": [
-        "이더는 알트 분위기를 빠르게 보여주는 편이다",
-        "알트장 흐름은 이더와 함께 보면 더 잘 보인다",
-        "저장해두면 비트와 비교해서 보기 좋다",
+        "저장해두면 다음 코인 흐름을 볼 때 도움됩니다",
+        "코인 변동성은 숫자와 함께 보는 편이 좋습니다",
+        "이런 흐름은 계속 체크하는 편이 좋습니다",
     ],
     "GOLD": [
-        "금값은 시장 공포를 읽는 쉬운 신호 중 하나다",
-        "안전자산 흐름은 저장해두고 비교해서 보는 편이 낫다",
-        "불안한 장에서는 금 흐름을 같이 봐야 한다",
+        "저장해두면 다음 금값 흐름을 볼 때 도움됩니다",
+        "불안한 장에서는 금 흐름도 함께 보는 편이 좋습니다",
+        "안전자산 흐름은 계속 체크하는 편이 좋습니다",
     ],
     "RATE": [
-        "금리 뉴스는 내 투자에 늦게라도 거의 다 연결된다",
-        "연준 이슈는 저장해두고 흐름을 비교하는 것이 좋다",
-        "달러와 나스닥을 같이 보는 사람에게는 중요한 숫자다",
+        "저장해두면 다음 금리 흐름을 볼 때 도움됩니다",
+        "금리 이슈는 달러와 주식까지 함께 흔듭니다",
+        "금리 흐름은 계속 체크하는 편이 좋습니다",
     ],
     "TRUMP": [
-        "정책 뉴스는 정치 얘기로 끝나지 않고 가격으로 번지는 경우가 많다",
-        "관세와 정책 변수는 결국 달러와 물가 기대를 흔든다",
-        "저장해두면 다음 정책 뉴스와 연결해서 보기 좋다",
-    ],
-    "MIDEAST": [
-        "중동 뉴스는 결국 유가와 금값으로 번지는 경우가 많다",
-        "지정학 뉴스는 체감보다 가격에서 먼저 반응한다",
-        "저장해두면 다음 전쟁 뉴스와 비교해서 보기 쉽다",
+        "저장해두면 다음 정책 이슈를 볼 때 도움됩니다",
+        "정책 뉴스는 결국 가격표로 번지는 경우가 많습니다",
+        "정책 흐름은 계속 체크하는 편이 좋습니다",
     ],
     "GENERAL": [
-        "저장해두면 다음 뉴스 볼 때 흐름 연결에 도움됩니다",
-        "숫자부터 보면 기사보다 시장 반응이 더 잘 보인다",
-        "이런 이슈는 지나가도 다시 체감으로 돌아올 수 있다",
+        "저장해두면 다음 흐름을 볼 때 도움됩니다",
+        "숫자부터 보면 시장 반응이 더 잘 보입니다",
+        "이런 흐름은 계속 체크하는 편이 좋습니다",
     ],
 }
 
 
 def _pick_cta(key, seed=""):
+    import hashlib
     lines = CTA_LINES.get(key, CTA_LINES["GENERAL"])
     if seed:
         h = int(hashlib.md5(seed.encode()).hexdigest()[:8], 16)
@@ -79,28 +80,27 @@ def _pick_cta(key, seed=""):
 
 
 def build_caption(rewritten, topic_key="GENERAL", is_breaking=False):
+    """인스타 캡션 생성 (CTA + 해시태그 포함)"""
     title1 = rewritten.get("title1", "")
     title2 = rewritten.get("title2", "")
     eyebrow = rewritten.get("eyebrow", "")
-    desc1 = rewritten.get("desc1", "")
-    desc2 = rewritten.get("desc2", "")
-    prob = rewritten.get("_prob", "")
-    vol = rewritten.get("_volume", "")
-    price = rewritten.get("_price_usd", "")
+    desc1  = rewritten.get("desc1", "")
+    desc2  = rewritten.get("desc2", "")
 
     hashtags = HASHTAGS.get(topic_key, HASHTAGS["GENERAL"])
-    cta = _pick_cta(topic_key, seed=title1 + title2)
+    cta = _pick_cta(topic_key, seed=title1)
 
-    extra_lines = []
+    # 폴리마켓 소스면 확률 표기 추가
+    prob = rewritten.get("_prob", "")
+    vol  = rewritten.get("_volume", "")
+
+    extra = ""
     if prob and vol:
-        extra_lines.append(f"📊 폴리마켓 확률 {prob} · 거래대금 {vol}")
+        extra = f"\n📊 폴리마켓 예측 확률 {prob} | 거래대금 {vol}"
     elif prob:
-        extra_lines.append(f"📊 폴리마켓 확률 {prob}")
-    if price:
-        extra_lines.append(f"💵 실시간 체크값 {price}")
+        extra = f"\n📊 폴리마켓 예측 확률 {prob}"
 
-    extra = "\n".join(extra_lines)
-    breaking_tag = "🚨 속보다\n\n" if is_breaking else ""
+    breaking_tag = "🚨 속보 — " if is_breaking else ""
 
     caption = f"""{breaking_tag}{eyebrow}
 
@@ -108,23 +108,23 @@ def build_caption(rewritten, topic_key="GENERAL", is_breaking=False):
 {title2}
 
 {desc1}
-{desc2}
-{extra}
+{desc2}{extra}
 
 ━━━━━━━━━━━━━━
 {cta}
 
-지갑에 영향 오는 이슈만
-핵심 숫자 위주로 정리한다.
+지갑에 영향 오는 이슈만 매일 정리합니다.
+저장해두면 다음 흐름을 볼 때 도움됩니다.
 
 {hashtags} #jadonnam #폴리마켓 #예측시장"""
 
-    return "\n".join([line.rstrip() for line in caption.splitlines()]).strip()
+    return caption.strip()
 
 
 def upload_to_imgbb(image_path):
+    """imgbb.com에 이미지 업로드 → 퍼블릭 URL 반환"""
     if not IMGBB_API_KEY:
-        raise RuntimeError("IMGBB_API_KEY 없음")
+        raise RuntimeError("IMGBB_API_KEY 없음. imgbb.com에서 무료 발급 필요")
 
     with open(image_path, "rb") as f:
         b64 = base64.b64encode(f.read()).decode("utf-8")
@@ -157,6 +157,7 @@ def create_container(image_url, caption):
 
 
 def create_carousel_item(image_url):
+    """캐러셀 아이템 컨테이너 생성"""
     res = requests.post(
         f"{GRAPH_URL}/{ACCOUNT_ID}/media",
         params={
@@ -173,6 +174,7 @@ def create_carousel_item(image_url):
 
 
 def create_carousel_container(item_ids, caption):
+    """캐러셀 메인 컨테이너 생성"""
     res = requests.post(
         f"{GRAPH_URL}/{ACCOUNT_ID}/media",
         params={
@@ -216,11 +218,12 @@ def publish(container_id):
     data = res.json()
     if "id" not in data:
         raise RuntimeError(f"발행 실패: {data}")
-    print(f"[Instagram] 포스팅 완료: {data['id']}")
+    print(f"[Instagram] 포스팅 완료! {data['id']}")
     return data["id"]
 
 
 def upload_single(image_path, caption):
+    """단일 이미지 업로드"""
     if not ACCESS_TOKEN or not ACCOUNT_ID:
         print("[Instagram] 토큰 없음 → 스킵")
         return None
@@ -235,26 +238,40 @@ def upload_single(image_path, caption):
 
 
 def upload_carousel(image_paths, caption):
+    """
+    캐러셀 (3장) 업로드
+    image_paths: [card1.png, card2.png, card3.png]
+    """
     if not ACCESS_TOKEN or not ACCOUNT_ID:
         print("[Instagram] 토큰 없음 → 스킵")
         return None
 
     try:
+        # 1. 각 이미지 imgbb 업로드
         urls = []
         for p in image_paths:
-            urls.append(upload_to_imgbb(p))
+            url = upload_to_imgbb(p)
+            urls.append(url)
             time.sleep(1)
 
+        # 2. 각 이미지 캐러셀 아이템 컨테이너 생성
         item_ids = []
         for url in urls:
-            item_ids.append(create_carousel_item(url))
+            iid = create_carousel_item(url)
+            item_ids.append(iid)
             time.sleep(1)
 
+        # 3. 캐러셀 메인 컨테이너
         cid = create_carousel_container(item_ids, caption)
+
+        # 4. 처리 대기
         wait_ready(cid)
+
+        # 5. 발행
         return publish(cid)
 
     except Exception as e:
         print(f"[Instagram carousel ERROR] {e}")
+        # 폴백: 첫 번째 이미지만 단일 업로드
         print("[Instagram] 폴백: 단일 이미지 업로드 시도")
         return upload_single(image_paths[0], caption)

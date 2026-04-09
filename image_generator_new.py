@@ -12,14 +12,13 @@ import os
 import base64
 import random
 import hashlib
-import requests
 from PIL import Image, ImageDraw, ImageFilter
 from openai import OpenAI
 
 client = OpenAI(api_key=(os.getenv("OPENAI_API_KEY") or "").strip())
 
 IMAGE_MODEL   = os.getenv("IMAGE_MODEL", "dall-e-3")
-IMAGE_QUALITY = os.getenv("IMAGE_QUALITY", "high")
+IMAGE_QUALITY = os.getenv("IMAGE_QUALITY", "hd")
 
 
 # ── 공통 프롬프트 베이스 ────────────────────────────────────
@@ -29,7 +28,7 @@ Create a photorealistic image for a Korean finance SNS account.
 CRITICAL STYLE:
 - Must look like a REAL photograph, NOT AI-generated
 - Photojournalism quality: sharp, natural lighting, authentic skin texture
-- Premium Korean finance editorial energy: one person with strong but believable emotional reaction
+- Korean finance thumbnail energy: one person with a strong but realistic emotional reaction
 - The face must be FULLY VISIBLE — the most important element
 - Subject takes up right 55% of frame, face clearly visible in upper portion
 - Left 45% intentionally dark/empty for Korean text overlay
@@ -38,14 +37,14 @@ CRITICAL STYLE:
 - Dark background: night city, dark office, dim room — never bright or white
 
 FACE REQUIREMENTS:
-- Clear emotional expression: tension, relief, surprise, concern, confidence, focus
+- Strong expression: open mouth or tense face, hands on head optional, realistic eyes and skin detail
 - Must look like a real Korean person caught in a genuine emotional moment
-- Think: finance magazine cover photo, but cinematic and emotionally readable
+- Think: premium finance thumbnail, cinematic and believable
 - Face positioned in UPPER RIGHT of frame so bottom text doesnt cover it
 
 STRICT NO:
 - No text, letters, numbers, watermarks, logos
-- No AI-looking smooth skin or plastic faces  
+- No plastic skin, no surreal anatomy, no poster-like fantasy look  
 - No studio lighting or white backgrounds
 - No split panels, collages, duplicate faces
 - No nudity or inappropriate content
@@ -56,8 +55,8 @@ SCENE_VARIANTS = {
 
     # ── BTC 상승 ─────────────────────────────────────────────
     "btc_moon": [
-        "Young Korean-looking male trader in a premium dark office, surprised but believable expression, focused eyes, subtle tension in posture, blurred bitcoin glow in background, gold and blue reflections",
-        "20s Korean trader in semi-formal outfit with controlled excitement, clenched fist near chest, dark city skyline and warm gold reflections behind him",
+        "Young Korean-looking male in expensive suit, jaw literally dropping open in disbelief, eyes bulging wide, both hands gripping head, giant glowing bitcoin coin floating in background, dark luxury penthouse at night, gold and blue neon reflections",
+        "20s Korean guy in semi-formal outfit screaming silently with fists clenched in the air, celebrating enormous profit, giant realistic bitcoin coin behind him, dramatic upward gold light beams, dark city skyline",
         "Korean trader in shock-smile hybrid expression, one hand pointing at something off-screen, the other covering mouth, blurred bitcoin chart glow in background, dark premium trading desk",
         "Young man with wild excited eyes and manic grin, phone in hand, bitcoin price notification visible concept (no actual text), champagne bottle nearby, dark luxury room",
     ],
@@ -72,9 +71,9 @@ SCENE_VARIANTS = {
 
     # ── 유가 충격 ────────────────────────────────────────────
     "oil_shock": [
-        "Korean businessman in a suit holding a fuel receipt, serious and strained expression, gas pump nozzle visible, industrial orange-black background with oil tanker silhouette",
+        "Shocked Korean businessman in suit holding a gas station receipt with expression of absolute horror, mouth wide open screaming, gas pump nozzle visible, industrial orange-black background, fire and oil tanker silhouette",
         "Korean man in office clothes grabbing steering wheel with white knuckles, face twisted in agony as he looks at gas price display (no text visible), fiery orange industrial backdrop",
-        "Businessman with tense posture and concerned expression, oil refinery and tankers behind him, dramatic orange-red sunset, high-stakes atmosphere",
+        "Businessman with both hands on sides of head screaming, massive oil refinery and tankers behind him, dramatic orange-red sunset, apocalyptic energy atmosphere",
         "Korean man in suit pointing frantically at something off-screen with jaw dropped, giant oil tanker port behind him, burning orange sky, extreme shock reaction",
     ],
 
@@ -86,7 +85,7 @@ SCENE_VARIANTS = {
 
     # ── 금값 ─────────────────────────────────────────────────
     "gold_rush": [
-        "Korean investor with focused and satisfied expression, surrounded by gold bars, warm vault lighting, premium safe-haven atmosphere",
+        "Korean investor with wide greedy eyes and huge smile, surrounded by stacks of gleaming gold bars, warm vault lighting, rich premium atmosphere, wealth obsession energy",
         "Man in expensive suit gently cradling a gold bar like it is precious, eyes lit up with pure joy, luxury safe room, warm golden ambient light",
         "Korean businessman pumping fist in air with ecstatic expression, realistic gold bars glowing behind him, premium dark warm room, winner energy",
         "Older Korean man with knowing satisfied smile touching gold bar stack, dark luxury background, safe-haven rush mood",
@@ -191,13 +190,13 @@ SCENE_VARIANTS = {
 
     # ── 이더리움 상승 ────────────────────────────────────────
     "eth_surge": [
-        "Young Korean trader with strong anticipation on his face, blue ethereum glow, futuristic dark finance setting, altcoin momentum atmosphere",
+        "Young Korean trader with manic excited expression, blue ethereum glow surrounding him, futuristic dark finance set, altcoin season energy, controlled chaos",
         "Korean crypto investor pumping both fists in air, electric blue light beams, dark premium room, altcoin euphoria",
     ],
 
     # ── 이더리움 하락 ────────────────────────────────────────
     "eth_drop": [
-        "Korean trader with tense expression and hands near face, blue-red stressed lighting, dark crypto trading room, altcoin risk mood",
+        "Korean trader with hands covering face, peeking through fingers, blue-red stressed lighting, dark crypto trading room, altcoin panic mood",
         "Young investor with slack-jawed expression of disbelief, cold blue light, dark premium setting, crypto disappointment",
     ],
 
@@ -258,28 +257,6 @@ def _fallback_gradient(output_path="bg.jpg"):
     return output_path
 
 
-
-
-def _save_result_image(result, output_path):
-    item = result.data[0]
-    image_b64 = getattr(item, "b64_json", None)
-    image_url = getattr(item, "url", None)
-
-    if image_b64:
-        image_bytes = base64.b64decode(image_b64)
-    elif image_url:
-        res = requests.get(image_url, timeout=30)
-        res.raise_for_status()
-        image_bytes = res.content
-    else:
-        raise RuntimeError("이미지 응답에 b64_json 또는 url이 없습니다")
-
-    with open(output_path, "wb") as f:
-        f.write(image_bytes)
-
-    return output_path
-
-
 def generate_bg(
     visual_topic="market_general",
     seed_text="",
@@ -308,8 +285,13 @@ def generate_bg(
             size="1024x1536",
         )
 
-    _save_result_image(result, output_path)
-    print(f"[Image] bg saved: {output_path}")
+    image_b64 = result.data[0].b64_json
+    image_bytes = base64.b64decode(image_b64)
+
+    with open(output_path, "wb") as f:
+        f.write(image_bytes)
+
+    print(f"[DALL-E] bg saved: {output_path}")
     return output_path
 
 
@@ -339,7 +321,7 @@ def safe_generate_bg(
             output_path=output_path,
         )
     except Exception as e:
-        print(f"[Image ERROR] {e}")
+        print(f"[DALL-E ERROR] {e}")
         return _fallback_gradient(output_path=output_path)
 
 
@@ -365,12 +347,15 @@ def generate_carousel_bgs(visual_topic, seed_text, context_title="", context_des
                 size="1024x1536",
                 quality=IMAGE_QUALITY,
             )
-            _save_result_image(result, output_path)
-            print(f"[Image] carousel bg {i} saved: {output_path}")
+            image_b64 = result.data[0].b64_json
+            image_bytes = base64.b64decode(image_b64)
+            with open(output_path, "wb") as f:
+                f.write(image_bytes)
+            print(f"[DALL-E] carousel bg {i} saved: {output_path}")
             paths.append(output_path)
 
         except Exception as e:
-            print(f"[Image carousel ERROR] card {i}: {e}")
+            print(f"[DALL-E carousel ERROR] card {i}: {e}")
             _fallback_gradient(output_path=output_path)
             paths.append(output_path)
 
