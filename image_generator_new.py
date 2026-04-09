@@ -1,11 +1,16 @@
 """
-image_generator_new.py — DALL-E 이미지 생성 (밈/자극 강화 + 변형 다양화)
+image_generator_new.py — 강한 감정 / 강한 자극 / 고CTR용 이미지 생성기
 
-변경사항:
-- 프롬프트 "밈 에너지" 강화: 과장된 표정, 드라마틱한 리액션
-- visual_variant 랜덤 선택 (매번 다른 이미지)
-- 캐러셀용 3장 연속 생성 지원
-- 폴백 그라디언트 개선
+방향:
+- 무조건 썸네일형
+- 감정 강함
+- 자극 강함
+- 좋은 뉴스는 기쁘고 들뜬 무드
+- 나쁜 뉴스는 어둡고 불안한 무드
+- 필요하면 살짝 웃긴 밈 에너지 포함
+- 얼굴은 크고 선명하게
+- 텍스트 올릴 왼쪽 공간 확보
+- 실패 시에도 왜 실패했는지 로그가 남도록 구성
 """
 
 import os
@@ -15,202 +20,231 @@ import hashlib
 from PIL import Image, ImageDraw, ImageFilter
 from openai import OpenAI
 
-client = OpenAI(api_key=(os.getenv("OPENAI_API_KEY") or "").strip())
+OPENAI_API_KEY = (os.getenv("OPENAI_API_KEY") or "").strip()
+if not OPENAI_API_KEY:
+    raise RuntimeError("OPENAI_API_KEY 환경변수가 비어 있습니다.")
 
-IMAGE_MODEL   = os.getenv("IMAGE_MODEL", "dall-e-3")
-IMAGE_QUALITY = os.getenv("IMAGE_QUALITY", "hd")
+client = OpenAI(api_key=OPENAI_API_KEY)
 
+# 안정성 우선. Railway에서 dall-e-3 hd가 자주 실패하면 아래 두 줄만 바꿔서 테스트
+IMAGE_MODEL = os.getenv("IMAGE_MODEL", "gpt-image-1")
+IMAGE_QUALITY = os.getenv("IMAGE_QUALITY", "high")
+IMAGE_SIZE = os.getenv("IMAGE_SIZE", "1024x1536")
 
-# ── 공통 프롬프트 베이스 ────────────────────────────────────
+# ─────────────────────────────────────────────────────────────
+# 공통 프롬프트
+# ─────────────────────────────────────────────────────────────
 COMMON_BASE = """
-Create a photorealistic image for a Korean finance SNS account.
+Create a HIGH-CTR photorealistic thumbnail image for a Korean finance Instagram account.
 
-CRITICAL STYLE:
-- Must look like a REAL photograph, NOT AI-generated
-- Photojournalism quality: sharp, natural lighting, authentic skin texture
-- Korean finance thumbnail energy: one person with a strong but realistic emotional reaction
-- The face must be FULLY VISIBLE — the most important element
-- Subject takes up right 55% of frame, face clearly visible in upper portion
-- Left 45% intentionally dark/empty for Korean text overlay
-- NO softbox lighting, NO studio look — dramatic natural or environmental light
-- High contrast, deep shadows, cinematic but raw and authentic
-- Dark background: night city, dark office, dim room — never bright or white
+NON-NEGOTIABLE GOAL:
+- This must stop scrolling instantly.
+- The image must feel emotionally intense, dramatic, and highly clickable.
+- It must look like a REAL photo, not generic AI art.
 
-FACE REQUIREMENTS:
-- Strong expression: open mouth or tense face, hands on head optional, realistic eyes and skin detail
-- Must look like a real Korean person caught in a genuine emotional moment
-- Think: premium finance thumbnail, cinematic and believable
-- Face positioned in UPPER RIGHT of frame so bottom text doesnt cover it
+STYLE:
+- photorealistic
+- cinematic
+- dark premium finance thumbnail
+- highly emotional
+- dramatic but believable
+- Korean SNS thumbnail energy
+- strong contrast
+- expensive, sharp, clean, modern
+- not flat, not corporate, not boring
 
-STRICT NO:
-- No text, letters, numbers, watermarks, logos
-- No plastic skin, no surreal anatomy, no poster-like fantasy look  
-- No studio lighting or white backgrounds
-- No split panels, collages, duplicate faces
-- No nudity or inappropriate content
+COMPOSITION:
+- One main subject only, unless scene explicitly requires two
+- Face must be large, clear, fully visible, high detail
+- Subject should be on RIGHT side of frame
+- LEFT side must have dark empty negative space for Korean text overlay
+- Upper-right face placement preferred
+- Chest-up or waist-up framing, not tiny full body
+- No clutter around the face
+- Keep background supportive, not distracting
+
+FACE / EMOTION RULES:
+- Emotion must be STRONG
+- If bullish / positive / relief / win:
+  excited, thrilled, smug, euphoric, wild disbelief, victorious grin
+- If bearish / negative / panic / war / inflation / risk:
+  shocked, terrified, frozen, stressed, devastated, tense, doom expression
+- If absurd or meme-worthy:
+  include subtle comic energy without becoming cartoonish
+- Expression must feel thumb-stopping
+
+VISUAL RULES:
+- Strong lighting contrast
+- Dark background preferred
+- Real skin texture
+- Real eyes
+- Real clothing folds
+- Premium finance editorial look
+- No bland office stock photo feeling
+
+STRICTLY FORBIDDEN:
+- no text
+- no letters
+- no numbers
+- no logos
+- no watermark
+- no duplicated faces
+- no collage
+- no infographic
+- no poster layout
+- no anime look
+- no plastic skin
+- no flat vector vibe
+- no washed-out lighting
+- no white background
 """
 
-# ── 씬별 프롬프트 ────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────
+# 토픽별 프롬프트
+# "자극적"이 핵심. 다만 주제에 따라 감정 방향을 다르게.
+# ─────────────────────────────────────────────────────────────
 SCENE_VARIANTS = {
-
-    # ── BTC 상승 ─────────────────────────────────────────────
+    # ── BTC 상승 ─────────────────────────────────────────
     "btc_moon": [
-        "Young Korean-looking male in expensive suit, jaw literally dropping open in disbelief, eyes bulging wide, both hands gripping head, giant glowing bitcoin coin floating in background, dark luxury penthouse at night, gold and blue neon reflections",
-        "20s Korean guy in semi-formal outfit screaming silently with fists clenched in the air, celebrating enormous profit, giant realistic bitcoin coin behind him, dramatic upward gold light beams, dark city skyline",
-        "Korean trader in shock-smile hybrid expression, one hand pointing at something off-screen, the other covering mouth, blurred bitcoin chart glow in background, dark premium trading desk",
-        "Young man with wild excited eyes and manic grin, phone in hand, bitcoin price notification visible concept (no actual text), champagne bottle nearby, dark luxury room",
+        "Young Korean male trader in dark suit, mouth wide open in ecstatic disbelief, eyes lit up, one hand gripping hair, the other holding phone, giant glowing bitcoin aura behind him, dark luxury penthouse at night, money energy, dramatic gold-blue reflections, feels like he just saw insane profits",
+        "Korean crypto guy with wild excited grin, eyebrows raised hard, phone in hand, body leaning forward as if he cannot believe the chart, premium dark room, glowing bitcoin symbol in blurred background, rich cinematic lighting, emotional and addictive thumbnail energy",
+        "Korean investor half-laughing half-screaming in joy, shoulders tense, eyes wide, deep gold light on face, dark finance room, blurred upward market glow, subtle meme energy but still realistic and premium",
+        "Young Korean businessman celebrating like a madman, fists tight, huge shocked smile, dark skyline behind him, gold neon reflections, bitcoin glow in background, high-adrenaline winning moment"
     ],
 
-    # ── BTC 하락 ─────────────────────────────────────────────
+    # ── BTC 하락 ─────────────────────────────────────────
     "btc_panic": [
-        "Korean man in suit with hands covering face in despair, peeking through fingers with terrified expression, bitcoin coin with red aura in background, dark trading room, dramatic red lighting",
-        "Young trader with horror-movie expression, hands gripping head, sweating, dark finance room, red emergency lighting atmosphere, chaos energy",
-        "Korean guy slumped in chair with dead eyes, defeated expression, dark office, cold blue light, existential dread mood",
-        "Man with both fists pressing against temples, eyes squeezed shut, grimacing in financial pain, dark premium room, deep shadows",
+        "Korean male trader in black suit with devastated panic expression, hands on head, eyes frozen, mouth slightly open, deep red emergency glow, dark trading desk, bitcoin symbol blurred behind him, feels like catastrophic loss",
+        "Young Korean investor staring in horror at phone, jaw dropped, cold sweat, dark room with red-blue lighting, background chart crash glow, premium but terrifying thumbnail energy",
+        "Korean man collapsing emotionally in chair, one hand over mouth, eyes blank with panic, dark office, financial doom mood, cinematic shadows, loss and regret everywhere",
+        "Korean trader with both fists at temples, furious and terrified expression, dark finance room, red bearish background glow, highly emotional crash moment"
     ],
 
-    # ── 유가 충격 ────────────────────────────────────────────
-    "oil_shock": [
-        "Shocked Korean businessman in suit holding a gas station receipt with expression of absolute horror, mouth wide open screaming, gas pump nozzle visible, industrial orange-black background, fire and oil tanker silhouette",
-        "Korean man in office clothes grabbing steering wheel with white knuckles, face twisted in agony as he looks at gas price display (no text visible), fiery orange industrial backdrop",
-        "Businessman with both hands on sides of head screaming, massive oil refinery and tankers behind him, dramatic orange-red sunset, apocalyptic energy atmosphere",
-        "Korean man in suit pointing frantically at something off-screen with jaw dropped, giant oil tanker port behind him, burning orange sky, extreme shock reaction",
-    ],
-
-    # ── 유가 안정 ────────────────────────────────────────────
-    "oil_relief": [
-        "Korean man exhaling deeply in relief, eyes closed, slight smile, oil tanker crossing calm sea at sunrise, warm golden light, tension easing mood",
-        "Businessman with relieved half-smile looking upward, industrial port background, calmer orange-blue dawn lighting",
-    ],
-
-    # ── 금값 ─────────────────────────────────────────────────
-    "gold_rush": [
-        "Korean investor with wide greedy eyes and huge smile, surrounded by stacks of gleaming gold bars, warm vault lighting, rich premium atmosphere, wealth obsession energy",
-        "Man in expensive suit gently cradling a gold bar like it is precious, eyes lit up with pure joy, luxury safe room, warm golden ambient light",
-        "Korean businessman pumping fist in air with ecstatic expression, realistic gold bars glowing behind him, premium dark warm room, winner energy",
-        "Older Korean man with knowing satisfied smile touching gold bar stack, dark luxury background, safe-haven rush mood",
-    ],
-
-    # ── 금리 의심 ────────────────────────────────────────────
-    "rate_cut_doubt": [
-        "Wall Street-style Korean trader with deeply furrowed brow and stressed expression, staring intensely at something off-screen, dark blue trading floor with blurred screens, anxiety and tension",
-        "Korean man in suit rubbing temples with both hands, eyes closed, exhausted stressed face, cool blue finance newsroom, macro dread atmosphere",
-        "Trader with half-grimace expression, one eyebrow raised skeptically, tablet in hand, dark blue premium office, uncertainty mood",
-        "Korean finance guy with clenched jaw and worried eyes, staring into distance, blurred market data glow behind him, tense serious mood",
-    ],
-
-    # ── 금리 기대 ────────────────────────────────────────────
-    "rate_cut_hype": [
-        "Korean trader with cautious excited expression, eyebrows raised, slight hopeful smile, blurred green trading screens behind, premium blue-green newsroom, cautious optimism",
-        "Young Korean investor with wide hopeful eyes, hands clasped together, dark finance room with soft upward lighting, anticipation mood",
-    ],
-
-    # ── 트럼프 긍정 ──────────────────────────────────────────
-    "trump_positive": [
-        "Donald Trump with supremely confident winner smirk, arms crossed, warm golden presidential spotlight, power and dominance mood, premium political atmosphere",
-        "Donald Trump with raised fist and triumphant expression, dramatic warm lighting from above, luxury political setting, deal-maker victorious energy",
-    ],
-
-    # ── 트럼프 부정 ──────────────────────────────────────────
-    "trump_negative": [
-        "Donald Trump with furious red-faced expression, finger pointing aggressively, smoky dark dramatic room, conflict and chaos energy, high-stakes atmosphere",
-        "Donald Trump mid-shout with intense angry expression, dark dramatic backdrop, economic shock mood, forceful chaotic energy",
-    ],
-
-    # ── 트럼프 관세 ──────────────────────────────────────────
-    "trump_tariff": [
-        "Donald Trump with aggressive confident expression making sharp hand gesture, dark room with industrial/trade backdrop, tariff-war tension mood, forceful economic policy energy",
-        "Donald Trump pointing directly at viewer with stern determined expression, dark premium room, economic warfare mood, high stakes atmosphere",
-    ],
-
-    # ── 트럼프 딜 긍정 ───────────────────────────────────────
-    "trump_deal_positive": [
-        "Donald Trump with massive satisfied smug grin, leaning forward, luxury boardroom, deal-maker champion energy, premium negotiation victory mood",
-        "Donald Trump with clasped hands and calculating satisfied smile, dark luxury office, powerful deal closed atmosphere",
-    ],
-
-    # ── 트럼프 딜 부정 ───────────────────────────────────────
-    "trump_deal_negative": [
-        "Donald Trump with irritated dismissive expression, arms slightly spread, tense negotiation room, deal-breaking frustrated energy",
-        "Donald Trump with skeptical frowning face, dark premium room, failed negotiation mood",
-    ],
-
-    # ── 인플레이션 ───────────────────────────────────────────
-    "inflation_shock": [
-        "Korean economist in suit with mouth open in shock, eyes wide, grabbing tie in panic, hot orange and electric blue contrast lighting, CPI shock atmosphere, economic emergency mood",
-        "Korean man checking grocery receipt with progressively worsening expression turning to horror, orange warm market lighting, inflation reality hitting hard mood",
-        "Middle-aged Korean man in suit with defeated face looking at wallet, dark warm lighting, cost-of-living crisis mood, relatable economic despair",
-    ],
-
-    # ── 채권 스트레스 ────────────────────────────────────────
-    "bond_stress": [
-        "Senior Korean finance professional with tired stress-lined face, one hand on forehead, dark bond trading room atmosphere, institutional worry mood",
-        "Korean trader staring blankly with thousand-yard stare, bond market pressure, cool blue desaturated lighting, macroeconomic fatigue",
-    ],
-
-    # ── 주식 상승 ────────────────────────────────────────────
-    "stocks_up": [
-        "Korean trader with barely-contained excitement, subtle winning smile with raised eyebrows, green market glow behind, premium newsroom, controlled euphoria",
-        "Young Korean investor with cautious thumbs up and excited eyes, dark finance room, rising market energy, cautious optimism",
-    ],
-
-    # ── 주식 하락 ────────────────────────────────────────────
-    "stocks_down": [
-        "Korean trader with hunched shoulders and stressed expression, dark trading floor, bearish pressure atmosphere, macro weight of the world",
-        "Korean investor with both hands pressing on desk, leaning forward with worried grimace, dark bear market room, heavy atmosphere",
-    ],
-
-    # ── 무역딜 ──────────────────────────────────────────────
-    "trade_deal_hype": [
-        "Two figures in expensive suits doing aggressive celebratory handshake, one with massive ecstatic grin, luxury dark boardroom, deal-closing victory energy",
-        "Korean businessman with explosive celebratory reaction, arms raised, luxury negotiation room, major deal just closed mood",
-    ],
-
-    # ── 무역 긴장 ────────────────────────────────────────────
-    "trade_tension": [
-        "Korean executive with tense furrowed brow watching cargo port from window, dark orange industrial atmosphere, tariff pressure mood, macro stress",
-        "Businessman with grimace watching shipping containers in distance, darker orange-black trade tension atmosphere",
-    ],
-
-    # ── 중동 긴장 ────────────────────────────────────────────
-    "mideast_tension": [
-        "Oil tanker silhouette under dramatic smoky orange-red sky, strategic chokepoint atmosphere, geopolitical risk premium mood, cinematic macro crisis scene",
-        "Korean finance professional with grave expression looking at phone, oil route map concept in blurred background, geopolitical stress mood, dark premium setting",
-    ],
-
-    # ── 중동 완화 ────────────────────────────────────────────
-    "mideast_relief": [
-        "Oil tanker under sunrise, calmer strategic sea route, golden dawn reflecting on water, relief after tension mood, ceasefire energy",
-    ],
-
-    # ── 정치 부정 ────────────────────────────────────────────
-    "politics_negative": [
-        "Tense Washington-style press room, worried Korean-looking political aide with phone, dark high-stakes atmosphere, drama and uncertainty mood",
-    ],
-
-    # ── 이더리움 상승 ────────────────────────────────────────
+    # ── ETH 상승 ─────────────────────────────────────────
     "eth_surge": [
-        "Young Korean trader with manic excited expression, blue ethereum glow surrounding him, futuristic dark finance set, altcoin season energy, controlled chaos",
-        "Korean crypto investor pumping both fists in air, electric blue light beams, dark premium room, altcoin euphoria",
+        "Young Korean trader with explosive excited expression, eyes wide, one fist raised, blue ethereum glow behind him, futuristic dark premium finance room, altcoin season energy, intense and addictive",
+        "Korean crypto investor laughing in disbelief, head slightly tilted back, bright blue light beams, dark room, intense upward momentum mood, cinematic and premium",
+        "Korean trader in dark jacket with manic hopeful grin, blue neon reflections, phone in hand, powerful altcoin rally mood, realistic but highly emotional thumbnail"
     ],
 
-    # ── 이더리움 하락 ────────────────────────────────────────
+    # ── ETH 하락 ─────────────────────────────────────────
     "eth_drop": [
-        "Korean trader with hands covering face, peeking through fingers, blue-red stressed lighting, dark crypto trading room, altcoin panic mood",
-        "Young investor with slack-jawed expression of disbelief, cold blue light, dark premium setting, crypto disappointment",
+        "Korean crypto investor in dark room with defeated expression, one hand on forehead, cold blue-red panic light, ethereum glow fading behind him, emotional pain and regret",
+        "Young Korean trader with hollow shocked eyes, blue coin symbol blurred behind, tense jaw, dark premium room, altcoin panic mood, realistic and dramatic"
     ],
 
-    # ── 일반 ────────────────────────────────────────────────
+    # ── 유가 충격 ────────────────────────────────────────
+    "oil_shock": [
+        "Shocked Korean businessman holding gas receipt, eyes wide in horror, mouth open, orange-black industrial background, oil flames and tanker silhouette, feels like gas prices just exploded",
+        "Korean office worker gripping steering wheel in panic, face tense and miserable, fiery orange refinery backdrop, oil shock atmosphere, dark and dramatic",
+        "Korean man in suit screaming silently with both hands on head, giant oil tanker and refinery glow behind him, burning orange sky, apocalyptic fuel price shock",
+        "Korean driver staring in dread at fuel cost situation, severe stress expression, industrial orange darkness, cinematic oil crisis energy"
+    ],
+
+    # ── 유가 완화 ────────────────────────────────────────
+    "oil_relief": [
+        "Korean businessman exhaling in relief with slight exhausted smile, warm sunrise over calm tanker route, soft orange-blue dawn, relief after chaos, premium but still emotional",
+        "Korean driver relaxing slightly with tired half-smile, calmer industrial background, morning light, after-shock relief mood"
+    ],
+
+    # ── 금 급등 ──────────────────────────────────────────
+    "gold_rush": [
+        "Korean investor with greedy shocked smile, eyes locked on glowing gold bars, dark luxury vault, warm golden dramatic light, safe-haven rush energy, rich and intense",
+        "Korean businessman gripping gold bar with disbelief and joy, expensive suit, vault background, powerful warm highlights, premium fear-trade thumbnail",
+        "Older Korean investor with satisfied but intense expression, touching stacked gold bars, dark luxury scene, fear in market but joy in safe haven"
+    ],
+
+    # ── 금리 부정 ────────────────────────────────────────
+    "rate_cut_doubt": [
+        "Korean finance professional with stressed skeptical face, brow deeply furrowed, blue newsroom glow, macro anxiety mood, dark premium setting, feels like market expectations are collapsing",
+        "Korean trader rubbing temples hard, exhausted and tense, dark finance room, cold blue light, interest-rate dread, emotionally heavy and realistic",
+        "Korean macro investor with clenched jaw and worried eyes, tablet in hand, dark premium office, uncertainty and dread"
+    ],
+
+    # ── 금리 호재 ────────────────────────────────────────
+    "rate_cut_hype": [
+        "Korean trader with stunned hopeful grin, eyebrows raised, dark finance room with upward blue-green glow, market relief mood, premium and emotional",
+        "Young Korean investor with eyes full of hope and disbelief, hands clasped together, dim premium room, rate-cut hype energy, dramatic but believable"
+    ],
+
+    # ── 인플레 충격 ───────────────────────────────────────
+    "inflation_shock": [
+        "Korean economist in suit with panic on face, tie slightly loose, hot orange and electric blue contrast, inflation disaster mood, dramatic and realistic",
+        "Korean man checking grocery receipt with expression turning from confusion to horror, warm market lights, cost-of-living crisis energy",
+        "Middle-aged Korean office worker staring at wallet in silent despair, dark warm background, inflation pain, deeply relatable"
+    ],
+
+    # ── 채권 스트레스 ─────────────────────────────────────
+    "bond_stress": [
+        "Senior Korean finance professional with tired, strained face, hand on forehead, dark institutional trading room, macro fatigue and bond stress mood",
+        "Korean trader with dead tired stare, blue desaturated lighting, bond market pressure, premium gloom"
+    ],
+
+    # ── 주식 상승 ────────────────────────────────────────
+    "stocks_up": [
+        "Korean trader with controlled but intense winning smile, green market glow, premium dark newsroom, feels like a comeback rally",
+        "Young Korean investor with excited disbelief and sharp eyes, dark finance room, rising stocks mood, premium and addictive thumbnail"
+    ],
+
+    # ── 주식 하락 ────────────────────────────────────────
+    "stocks_down": [
+        "Korean trader with hunched shoulders and stressed grimace, dark bear market room, heavy atmosphere, financial pressure everywhere",
+        "Korean investor leaning over desk with worried face, dark premium setting, red market glow, risk-off panic mood"
+    ],
+
+    # ── 무역 긴장 ────────────────────────────────────────
+    "trade_tension": [
+        "Korean executive with tense face looking out over cargo port, orange industrial darkness, tariff pressure mood, cinematic macro tension",
+        "Businessman watching shipping containers with grimace, dark orange-black background, trade war stress"
+    ],
+
+    # ── 무역 딜 기대 ─────────────────────────────────────
+    "trade_deal_hype": [
+        "Korean businessman with explosive relieved reaction, arms slightly raised, luxury boardroom, major deal just closed mood, intense but premium",
+        "Two suited figures doing aggressive celebratory handshake, one with ecstatic grin, dark premium negotiation room, deal victory energy"
+    ],
+
+    # ── 중동 긴장 ────────────────────────────────────────
+    "mideast_tension": [
+        "Korean finance guy with grave shocked expression looking at phone, dark premium room, blurred tanker route and orange-red crisis sky behind, geopolitical panic mood",
+        "Oil tanker silhouette under smoky orange-red sky, one worried Korean male foreground face in shock, high-stakes macro crisis thumbnail",
+        "Korean trader staring in dread at geopolitical alert, dark room, orange war glow, oil route crisis mood"
+    ],
+
+    # ── 중동 완화 ────────────────────────────────────────
+    "mideast_relief": [
+        "Korean finance professional with stunned relief expression, calm sunrise over strategic sea route, warm dawn, tension finally easing but still intense",
+        "Oil tanker in peaceful dawn light, Korean businessman exhaling deeply in relief, premium geopolitical calm-after-chaos mood"
+    ],
+
+    # ── 트럼프 관세 / 정책 ───────────────────────────────
+    "trump_tariff": [
+        "Donald Trump with aggressive determined expression, sharp hand gesture, dark premium room, tariff-war tension, high-stakes macro chaos energy",
+        "Donald Trump pointing with stern intense face, dark dramatic backdrop, economic warfare mood, powerful and provocative thumbnail"
+    ],
+
+    "trump_deal_positive": [
+        "Donald Trump with smug victorious grin, luxury boardroom mood, deal just worked, golden dramatic light, strong political-money thumbnail energy",
+        "Donald Trump leaning forward with deeply satisfied smile, dark premium office, dealmaker success atmosphere"
+    ],
+
+    "trump_deal_negative": [
+        "Donald Trump with irritated tense face, dark negotiation room, failed deal mood, frustration and uncertainty everywhere",
+        "Donald Trump with skeptical frown, heavy dramatic shadow, deal breakdown energy"
+    ],
+
+    # ── 일반 ────────────────────────────────────────────
     "market_general": [
-        "Korean finance professional with intensely focused expression, dark premium newsroom, cinematic macro atmosphere, editorial finance magazine mood",
-        "Korean investor with calculating expression, one hand on chin, dark luxury finance room, market analysis mood",
-        "Young Korean trader with raised eyebrow and slight smirk, dark blue premium setting, sharp market instinct energy",
+        "Korean finance professional with very intense focused face, dark premium newsroom, sharp contrast, strong market tension, addictive finance thumbnail",
+        "Young Korean investor with raised eyebrow and shocked half-smile, dark cinematic office, money and market energy, believable but highly emotional",
+        "Korean businessman in suit with strong reaction face, dark luxury finance room, premium editorial mood, scroll-stopping"
     ],
 }
 
-
+# ─────────────────────────────────────────────────────────────
+# 보조 유틸
+# ─────────────────────────────────────────────────────────────
 def pick_variant(visual_topic, seed_text=""):
-    """시드 기반 랜덤 변형 선택 (같은 뉴스는 항상 같은 이미지)"""
     variants = SCENE_VARIANTS.get(visual_topic, SCENE_VARIANTS["market_general"])
     if seed_text:
         h = int(hashlib.md5(seed_text.encode("utf-8")).hexdigest()[:8], 16)
@@ -218,38 +252,92 @@ def pick_variant(visual_topic, seed_text=""):
     return random.choice(variants)
 
 
+def infer_emotion_hint(visual_topic, context_title="", context_desc=""):
+    text = f"{visual_topic} {context_title} {context_desc}".lower()
+
+    positive_keys = [
+        "moon", "surge", "up", "relief", "positive", "hype", "rush",
+        "deal", "cut", "win", "breakout", "rally"
+    ]
+    negative_keys = [
+        "panic", "shock", "stress", "down", "drop", "negative",
+        "tariff", "tension", "inflation", "war", "attack", "crash", "doubt"
+    ]
+
+    pos = sum(1 for k in positive_keys if k in text)
+    neg = sum(1 for k in negative_keys if k in text)
+
+    if pos > neg:
+        return """
+EMOTIONAL DIRECTION:
+- positive
+- exciting
+- euphoric
+- thrilling
+- smug winning energy allowed
+- slightly funny meme energy allowed if it increases click-through
+"""
+    return """
+EMOTIONAL DIRECTION:
+- negative
+- dark
+- shocking
+- stressful
+- anxiety-heavy
+- doomy
+- if suitable, slightly absurd panic energy allowed to increase click-through
+"""
+
+
 def build_prompt(visual_topic="market_general", seed_text="", context_title="", context_desc=""):
     scene = pick_variant(visual_topic, seed_text=seed_text)
+    emotion_hint = infer_emotion_hint(visual_topic, context_title, context_desc)
 
     context = ""
     if context_title:
-        context = f"\nContent context (for mood reference only, DO NOT add text):\n{context_title}"
-        if context_desc:
-            context += f" — {context_desc[:80]}"
+        context = f"""
+CONTENT CONTEXT (for mood reference only, DO NOT put text in the image):
+- title: {context_title}
+- description: {context_desc[:160]}
+"""
 
-    return COMMON_BASE + context + f"\n\nSCENE:\n{scene}"
+    extra_push = """
+ADDITIONAL CLICK-THROUGH BOOST:
+- Make the subject look like they just witnessed something life-changing
+- Expression should feel instantly readable on a phone screen
+- Do not make it classy-boring; make it emotionally impossible to ignore
+- Premium, but provocative
+- Realistic, but intense
+"""
+
+    return COMMON_BASE + "\n" + emotion_hint + "\n" + extra_push + "\n" + context + "\nSCENE:\n" + scene
 
 
-def _fallback_gradient(output_path="bg.jpg"):
-    """API 실패 시 폴백 그라디언트 이미지"""
+def _fallback_gradient(output_path="bg.jpg", mood="dark"):
     w, h = 1024, 1536
-    img = Image.new("RGB", (w, h), (10, 12, 20))
+    base = (10, 12, 20) if mood == "dark" else (30, 25, 18)
+    img = Image.new("RGB", (w, h), base)
     draw = ImageDraw.Draw(img)
 
-    # 어두운 그라디언트
+    if mood == "bright":
+        top_color = (45, 35, 20)
+        bottom_color = (80, 55, 25)
+    else:
+        top_color = (10, 12, 20)
+        bottom_color = (26, 16, 35)
+
     for y in range(h):
         ratio = y / max(h - 1, 1)
-        r = int(10 * (1 - ratio) + 28 * ratio)
-        g = int(12 * (1 - ratio) + 18 * ratio)
-        b = int(20 * (1 - ratio) + 35 * ratio)
+        r = int(top_color[0] * (1 - ratio) + bottom_color[0] * ratio)
+        g = int(top_color[1] * (1 - ratio) + bottom_color[1] * ratio)
+        b = int(top_color[2] * (1 - ratio) + bottom_color[2] * ratio)
         draw.line([(0, y), (w, y)], fill=(r, g, b))
 
-    # 우측 하단 광원 효과
-    for i in range(120):
-        alpha = int(40 * (1 - i / 120))
+    for i in range(160):
+        alpha = int(50 * (1 - i / 160))
         draw.ellipse(
-            (w - 300 - i, h - 400 - i, w + i, h + i),
-            outline=(80, 60, 20, alpha)
+            (w - 340 - i, h - 500 - i, w + i, h + i),
+            outline=(120, 80, 25, alpha)
         )
 
     img = img.filter(ImageFilter.GaussianBlur(radius=1.2))
@@ -257,6 +345,18 @@ def _fallback_gradient(output_path="bg.jpg"):
     return output_path
 
 
+def _is_positive_topic(visual_topic="", context_title="", context_desc=""):
+    text = f"{visual_topic} {context_title} {context_desc}".lower()
+    positive_keys = ["moon", "surge", "up", "relief", "positive", "hype", "rush", "deal", "win", "rally"]
+    negative_keys = ["panic", "shock", "stress", "down", "drop", "negative", "tariff", "tension", "inflation", "war", "attack", "crash"]
+    pos = sum(1 for k in positive_keys if k in text)
+    neg = sum(1 for k in negative_keys if k in text)
+    return pos > neg
+
+
+# ─────────────────────────────────────────────────────────────
+# 실제 생성
+# ─────────────────────────────────────────────────────────────
 def generate_bg(
     visual_topic="market_general",
     seed_text="",
@@ -271,27 +371,27 @@ def generate_bg(
         context_desc=context_desc,
     )
 
-    try:
-        result = client.images.generate(
-            model=IMAGE_MODEL,
-            prompt=prompt,
-            size="1024x1536",
-            quality=IMAGE_QUALITY,
-        )
-    except Exception:
-        result = client.images.generate(
-            model=IMAGE_MODEL,
-            prompt=prompt,
-            size="1024x1536",
-        )
+    print(f"[IMAGE] model={IMAGE_MODEL} quality={IMAGE_QUALITY} size={IMAGE_SIZE}")
+    print(f"[IMAGE] topic={visual_topic} seed={seed_text[:40]}")
+    print(f"[IMAGE] prompt preview={prompt[:300]} ...")
+
+    result = client.images.generate(
+        model=IMAGE_MODEL,
+        prompt=prompt,
+        size=IMAGE_SIZE,
+        quality=IMAGE_QUALITY,
+    )
 
     image_b64 = result.data[0].b64_json
+    if not image_b64:
+        raise RuntimeError("이미지 생성 응답에 b64_json이 없습니다.")
+
     image_bytes = base64.b64decode(image_b64)
 
     with open(output_path, "wb") as f:
         f.write(image_bytes)
 
-    print(f"[DALL-E] bg saved: {output_path}")
+    print(f"[IMAGE] bg saved: {output_path}")
     return output_path
 
 
@@ -301,12 +401,10 @@ def safe_generate_bg(
     context_title="",
     context_desc="",
     output_path="bg.jpg",
-    # 하위 호환성 (기존 card.py가 이 파라미터들을 넘김)
     title="",
     desc="",
     visual_variant="",
 ):
-    # 기존 호환 파라미터 처리
     if title and not context_title:
         context_title = title
     if desc and not context_desc:
@@ -321,42 +419,52 @@ def safe_generate_bg(
             output_path=output_path,
         )
     except Exception as e:
-        print(f"[DALL-E ERROR] {e}")
-        return _fallback_gradient(output_path=output_path)
+        mood = "bright" if _is_positive_topic(visual_topic, context_title, context_desc) else "dark"
+        print(f"[IMAGE ERROR] {repr(e)}")
+        print(f"[IMAGE ERROR] fallback gradient used. mood={mood}")
+        return _fallback_gradient(output_path=output_path, mood=mood)
 
 
 def generate_carousel_bgs(visual_topic, seed_text, context_title="", context_desc=""):
-    """
-    캐러셀용 3장 이미지 생성
-    같은 토픽이지만 서로 다른 변형으로 생성
-    """
     paths = []
     variants = SCENE_VARIANTS.get(visual_topic, SCENE_VARIANTS["market_general"])
 
     for i in range(3):
-        # 카드별로 다른 변형 선택
         variant = variants[i % len(variants)]
-        prompt = COMMON_BASE + f"\n\nSCENE:\n{variant}"
+        emotion_hint = infer_emotion_hint(visual_topic, context_title, context_desc)
+        prompt = COMMON_BASE + "\n" + emotion_hint + """
+ADDITIONAL CLICK-THROUGH BOOST:
+- Make it intense
+- Make it emotional
+- Make it highly clickable
+- Do not become cartoonish
+""" + f"\nSCENE:\n{variant}"
 
         output_path = f"bg_c{i}.jpg"
 
         try:
+            print(f"[IMAGE CAROUSEL] generating card={i} topic={visual_topic}")
             result = client.images.generate(
                 model=IMAGE_MODEL,
                 prompt=prompt,
-                size="1024x1536",
+                size=IMAGE_SIZE,
                 quality=IMAGE_QUALITY,
             )
             image_b64 = result.data[0].b64_json
+            if not image_b64:
+                raise RuntimeError("캐러셀 이미지 응답에 b64_json이 없습니다.")
+
             image_bytes = base64.b64decode(image_b64)
             with open(output_path, "wb") as f:
                 f.write(image_bytes)
-            print(f"[DALL-E] carousel bg {i} saved: {output_path}")
+
+            print(f"[IMAGE CAROUSEL] saved: {output_path}")
             paths.append(output_path)
 
         except Exception as e:
-            print(f"[DALL-E carousel ERROR] card {i}: {e}")
-            _fallback_gradient(output_path=output_path)
+            mood = "bright" if _is_positive_topic(visual_topic, context_title, context_desc) else "dark"
+            print(f"[IMAGE CAROUSEL ERROR] card={i} err={repr(e)}")
+            _fallback_gradient(output_path=output_path, mood=mood)
             paths.append(output_path)
 
     return paths
