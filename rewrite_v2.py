@@ -42,9 +42,9 @@ NEWS_HOOKS = {
 
 TITLE2_MAP = {
     "TRUMP": [
-        "달러 움직임부터 살펴봐야 한다",
-        "관세와 환율 부담이 커질 수 있다",
         "정책 변수의 영향이 다시 커졌다",
+        "관세와 환율 부담이 커질 수 있다",
+        "정책 이슈가 시장을 다시 흔든다",
     ],
     "BTC": [
         "코인판 기대감이 다시 살아난다",
@@ -122,33 +122,43 @@ def _pick_key(title, desc):
     return "GENERAL"
 
 
+def _remove_english(text):
+    text = re.sub(r"[A-Za-z]+", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
 def _natural_title1(title, key):
-    text = title.strip()
+    text = _remove_english(title.strip())
 
     if key == "OIL":
         if "유가" in text:
             return _clean(text, 22)
-        return _clean("유가 흐름이 다시 심상치 않다", 22)
+        return "유가 흐름이 다시 심상치 않다"
 
     if key == "BTC":
-        if "비트" in text or "bitcoin" in text.lower() or "btc" in text.lower():
+        if "비트" in text or "코인" in text:
             return _clean(text, 22)
-        return _clean("비트 흐름이 다시 강해지고 있다", 22)
+        return "비트 흐름이 다시 강해지고 있다"
 
     if key == "RATE":
         if "환율" in text or "달러" in text:
             return _clean(text, 22)
-        return _clean("달러와 환율 흐름이 흔들린다", 22)
+        return "달러와 환율 흐름이 흔들린다"
 
     if key == "TRUMP":
-        return _clean(text, 22)
+        if text:
+            return _clean(text, 22)
+        return "정책 변수의 영향이 커졌다"
 
     if key == "GOLD":
         if "금" in text:
             return _clean(text, 22)
-        return _clean("금값 흐름이 다시 강해지고 있다", 22)
+        return "금값 흐름이 다시 강해지고 있다"
 
-    return _clean(text, 22)
+    if text:
+        return _clean(text, 22)
+    return "시장 흐름이 크게 흔들린다"
 
 
 def rewrite(title, desc, mode="normal", number_hint=None, retry=0):
@@ -181,9 +191,11 @@ def rewrite(title, desc, mode="normal", number_hint=None, retry=0):
         "GENERAL": "gold",
     }[key]
 
-    eyebrow = _stable_pick(NEWS_HOOKS[key], title)
+    seed = f"{title} {desc}"
+
+    eyebrow = _stable_pick(NEWS_HOOKS[key], seed)
     title1 = _natural_title1(title, key)
-    title2 = _stable_pick(TITLE2_MAP[key], title)
+    title2 = _stable_pick(TITLE2_MAP[key], seed)
     desc1 = DESC1_MAP[key]
     desc2 = DESC2_MAP[key]
 

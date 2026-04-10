@@ -12,7 +12,7 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 
 IMAGE_MODEL = os.getenv("IMAGE_MODEL", "dall-e-3")
 IMAGE_QUALITY = os.getenv("IMAGE_QUALITY", "hd")
-IMAGE_SIZE = os.getenv("IMAGE_SIZE", "1024x1536")
+IMAGE_SIZE = os.getenv("IMAGE_SIZE", "1024x1024")
 
 
 COMMON_BASE = """
