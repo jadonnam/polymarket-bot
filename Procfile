@@ -1,1 +1,1 @@
-worker: python main_master_v2.py
+worker: python main_master_v3.py
