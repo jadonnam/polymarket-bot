@@ -1,285 +1,426 @@
 import os
-import math
-from typing import List, Dict, Optional
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
+import re
+from PIL import Image, ImageDraw, ImageFont
 
 W, H = 1080, 1350
-OUT_DEFAULT = "output_rank"
 
-BG_TOP = (5, 8, 16)
-BG_MID = (10, 16, 29)
-BG_BOTTOM = (18, 25, 40)
-CARD_BG = (14, 20, 34, 230)
-CARD_BG_2 = (18, 24, 38, 240)
-CARD_BORDER = (42, 55, 79, 255)
-TEXT_MAIN = (245, 248, 255)
-TEXT_SUB = (147, 161, 188)
-TEXT_FAINT = (102, 118, 144)
-LINE_SOFT = (43, 59, 84)
-WHITE = (255, 255, 255)
+# ─────────────────────────────
+# Color System
+# ─────────────────────────────
+BG_TOP = (8, 12, 18)
+BG_BOTTOM = (11, 16, 24)
 
-ACCENTS = {
-    "뉴스": (78, 168, 255),
-    "폴리마켓": (255, 163, 72),
-    "시장 반응": (86, 223, 160),
+WHITE = (244, 246, 248)
+WHITE_SOFT = (228, 232, 238)
+GRAY = (150, 158, 170)
+GRAY_DIM = (102, 110, 122)
+
+LINE = (34, 42, 54)
+LINE_SOFT = (24, 30, 40)
+
+ACCENT_NEWS = (210, 220, 232)     # cool silver
+ACCENT_POLY = (255, 170, 52)      # amber
+ACCENT_MARKET = (62, 208, 178)    # teal
+
+TRACK = (49, 58, 74)
+PANEL = (10, 15, 22)
+PANEL_OUTLINE = (20, 27, 38)
+
+PAGE_THEME = {
+    "news": {
+        "accent": ACCENT_NEWS,
+        "footer": "NEWS",
+        "kicker": "EDITORIAL",
+        "subtitle": "지난 구간 핵심 이슈",
+    },
+    "poly": {
+        "accent": ACCENT_POLY,
+        "footer": "POLYMARKET",
+        "kicker": "PREDICTION",
+        "subtitle": "베팅이 몰린 흐름",
+    },
+    "market": {
+        "accent": ACCENT_MARKET,
+        "footer": "MARKET",
+        "kicker": "REACTION",
+        "subtitle": "가격이 반응한 구간",
+    },
 }
 
-SUBTITLES = {
-    "뉴스": "최근 이슈 강도 기준 TOP 5",
-    "폴리마켓": "베팅 자금 + 확률 반응 TOP 5",
-    "시장 반응": "실제 자산 민감도 기준 TOP 5",
-}
+# ─────────────────────────────
+# Font
+# ─────────────────────────────
+BASE_DIR = os.path.dirname(__file__)
+FONT_DIR = os.path.join(BASE_DIR, "fonts")
 
+BOLD_PATH = os.path.join(FONT_DIR, "Pretendard-Bold.ttf")
+REG_PATH = os.path.join(FONT_DIR, "Pretendard-Regular.ttf")
 
-def _font_candidates(bold: bool = True):
-    name = "Pretendard-Bold.ttf" if bold else "Pretendard-Regular.ttf"
-    return [
-        os.path.join(os.path.dirname(__file__), "fonts", name),
-        os.path.join(os.path.dirname(__file__), name),
-        os.path.join("fonts", name),
-        name,
-        "/mnt/data/Pretendard-Bold.ttf" if bold else "/mnt/data/Pretendard-Regular.ttf",
+def _font(size, bold=False):
+    path = BOLD_PATH if bold else REG_PATH
+    if os.path.exists(path):
+        return ImageFont.truetype(path, size)
+    return ImageFont.load_default()
+
+FONT_BRAND = _font(20, False)
+FONT_KICKER = _font(15, False)
+FONT_TITLE = _font(78, True)
+FONT_SUB = _font(21, False)
+
+FONT_INDEX = _font(25, True)
+FONT_STAR = _font(27, True)
+FONT_LABEL_TOP = _font(44, True)
+FONT_LABEL = _font(36, True)
+FONT_SCORE_TOP = _font(52, True)
+FONT_SCORE = _font(40, True)
+FONT_NOTE = _font(17, False)
+FONT_META = _font(16, False)
+FONT_FOOT = _font(17, False)
+
+# ─────────────────────────────
+# Utils
+# ─────────────────────────────
+def _ensure_dir(path):
+    os.makedirs(path, exist_ok=True)
+
+def _clamp(v, lo, hi):
+    return max(lo, min(hi, v))
+
+def _clean_text(text):
+    text = str(text).replace("\n", " ").strip()
+    while "  " in text:
+        text = text.replace("  ", " ")
+    return text
+
+def _score_to_int(score):
+    try:
+        return _clamp(int(round(float(score))), 0, 100)
+    except Exception:
+        return 0
+
+def _text_w(draw, text, font):
+    box = draw.textbbox((0, 0), text, font=font)
+    return box[2] - box[0]
+
+def _draw_text(draw, xy, text, font, fill):
+    draw.text(xy, text, font=font, fill=fill)
+
+def _trim_text(draw, text, font, max_width):
+    text = _clean_text(text)
+    if _text_w(draw, text, font) <= max_width:
+        return text
+    s = text
+    while len(s) > 1:
+        s = s[:-1].rstrip()
+        cand = s + "…"
+        if _text_w(draw, cand, font) <= max_width:
+            return cand
+    return "…"
+
+# ─────────────────────────────
+# Label refinement
+# ─────────────────────────────
+def _refine_common_label(text: str) -> str:
+    t = _clean_text(text)
+
+    replacements = [
+        ("급등 압박", "상방 압력"),
+        ("급등", "강세 확대"),
+        ("상승세", "강세 유지"),
+        ("강세 지속", "강세 유지"),
+        ("휴전 임박", "휴전 기대"),
+        ("휴전 4월?", "휴전 기대"),
+        ("정상화?", "정상화 기대"),
+        ("돌파?", "상단 테스트"),
+        ("도달?", "상단 도전"),
+        ("논의", "기대"),
+        ("반응", "선호 강화"),
+        ("압박", "부담 확대"),
+        ("변동성", "변동성 확대"),
+        ("논란", "변수 확대"),
+    ]
+    for a, b in replacements:
+        t = t.replace(a, b)
+
+    short_rules = [
+        (r"이란-미국 휴전.*", "휴전 기대 확대"),
+        (r"비트코인 .*돌파.*", "비트코인 상단 테스트"),
+        (r"유가 .*도달.*", "유가 상단 도전"),
+        (r"호르무즈 .*정상화.*", "호르무즈 정상화 기대"),
+        (r"트럼프 .*", "트럼프 변수 확대"),
+        (r"달러 강세.*", "달러 강세 유지"),
+        (r"금리 .*기대.*", "금리 완화 기대"),
+        (r"유가 .*압력.*", "유가 상방 압력"),
+        (r"환율 .*확대.*", "환율 변동성 확대"),
+        (r"금값 .*", "금 선호 강화"),
+        (r"금 .*선호.*", "금 선호 강화"),
+    ]
+    for pattern, repl in short_rules:
+        if re.search(pattern, t):
+            return repl
+    return t
+
+def _refine_label(text: str, page_type: str) -> str:
+    t = _refine_common_label(text)
+
+    if page_type == "news":
+        rules = [
+            (r".*유가.*", "유가 상방 압력"),
+            (r".*휴전.*", "휴전 기대 확대"),
+            (r".*비트.*", "비트코인 강세 유지"),
+            (r".*달러.*", "달러 강세 유지"),
+            (r".*금리.*", "금리 완화 기대"),
+            (r".*금.*", "안전자산 선호"),
+        ]
+    elif page_type == "poly":
+        rules = [
+            (r".*유가.*", "유가 상단 도전"),
+            (r".*휴전.*", "휴전 베팅 확대"),
+            (r".*호르무즈.*", "호르무즈 정상화 기대"),
+            (r".*트럼프.*", "트럼프 변수 확대"),
+            (r".*비트.*", "비트코인 상단 테스트"),
+        ]
+    else:
+        rules = [
+            (r".*유가.*", "유가 상방 압력"),
+            (r".*환율.*", "환율 변동성 확대"),
+            (r".*비트.*", "비트코인 강세 유지"),
+            (r".*금.*", "금 선호 강화"),
+            (r".*금리.*", "금리 부담 확대"),
+        ]
+
+    for pattern, repl in rules:
+        if re.search(pattern, t):
+            return repl
+    return t
+
+def _hero_note(label: str, page_type: str) -> str:
+    if page_type == "news":
+        table = {
+            "유가 상방 압력": "에너지 가격 이슈 재부각",
+            "휴전 기대 확대": "지정학 완화 기대 반영",
+            "비트코인 강세 유지": "위험자산 선호 재확대",
+            "달러 강세 유지": "환율 부담 지속",
+            "금리 완화 기대": "정책 기대 반영",
+            "안전자산 선호": "방어 자산 선호 확대",
+        }
+    elif page_type == "poly":
+        table = {
+            "유가 상단 도전": "상방 시나리오 베팅 집중",
+            "휴전 베팅 확대": "정치 이벤트 자금 유입",
+            "호르무즈 정상화 기대": "물류 정상화 기대 반영",
+            "트럼프 변수 확대": "정책 변수 베팅 확대",
+            "비트코인 상단 테스트": "상단 돌파 기대 유입",
+        }
+    else:
+        table = {
+            "유가 상방 압력": "실물 체감 연결 구간",
+            "환율 변동성 확대": "달러 영향 확산",
+            "비트코인 강세 유지": "위험 선호 유지",
+            "금 선호 강화": "안전자산 선호 증가",
+            "금리 부담 확대": "고금리 부담 재부각",
+        }
+    return table.get(label, "이번 구간 핵심 흐름")
+
+# ─────────────────────────────
+# Drawing
+# ─────────────────────────────
+def _make_background():
+    img = Image.new("RGB", (W, H), BG_TOP)
+    d = ImageDraw.Draw(img)
+
+    for y in range(H):
+        r = y / H
+        rr = int(BG_TOP[0] * (1 - r) + BG_BOTTOM[0] * r)
+        gg = int(BG_TOP[1] * (1 - r) + BG_BOTTOM[1] * r)
+        bb = int(BG_TOP[2] * (1 - r) + BG_BOTTOM[2] * r)
+        d.line((0, y, W, y), fill=(rr, gg, bb))
+
+    d.rounded_rectangle((132, 182, 948, 1210), radius=30, fill=PANEL, outline=PANEL_OUTLINE, width=1)
+    d.line((70, 108, W - 70, 108), fill=LINE, width=1)
+    d.line((70, 266, W - 70, 266), fill=LINE, width=1)
+    return img
+
+def _draw_header(draw, title, subtitle, kicker, accent):
+    _draw_text(draw, (70, 42), "JADONNAM", FONT_BRAND, GRAY)
+    _draw_text(draw, (W // 2 - _text_w(draw, kicker, FONT_KICKER)//2, 124), kicker, FONT_KICKER, accent)
+
+    title_w = _text_w(draw, title, FONT_TITLE)
+    _draw_text(draw, ((W - title_w) // 2, 142), title, FONT_TITLE, WHITE)
+
+    sub_w = _text_w(draw, subtitle, FONT_SUB)
+    _draw_text(draw, ((W - sub_w) // 2, 224), subtitle, FONT_SUB, GRAY_DIM)
+
+    draw.line((W // 2 - 50, 278, W // 2 + 50, 278), fill=accent, width=2)
+
+def _draw_bar(draw, x, y, w, h, pct, accent):
+    draw.rounded_rectangle((x, y, x + w, y + h), radius=h // 2, fill=TRACK)
+    fill_w = int(w * _clamp(pct, 0, 100) / 100)
+    if fill_w > 0:
+        draw.rounded_rectangle((x, y, x + fill_w, y + h), radius=h // 2, fill=accent)
+
+def _draw_hero_importance(draw, right_x, score_text, top, accent):
+    meta = "중요도"
+    meta_w = _text_w(draw, meta, FONT_META)
+    score_w = _text_w(draw, score_text, FONT_SCORE_TOP)
+    total_w = meta_w + 10 + score_w
+    start_x = right_x - total_w
+
+    _draw_text(draw, (start_x, top + 34), meta, FONT_META, GRAY)
+    _draw_text(draw, (start_x + meta_w + 10, top + 16), score_text, FONT_SCORE_TOP, accent)
+
+def _draw_hero(draw, item, accent, page_type):
+    left = 86
+    right = W - 86
+    top = 340
+
+    draw.rounded_rectangle((left, top, right, top + 132), radius=16, outline=(24, 31, 42), fill=(12, 17, 24), width=1)
+
+    _draw_text(draw, (left + 16, top + 24), "01", FONT_INDEX, GRAY)
+    _draw_text(draw, (left + 58, top + 20), "★", FONT_STAR, accent)
+
+    score_text = f"{item['score']}%"
+    _draw_hero_importance(draw, right - 18, score_text, top, accent)
+
+    label_x = left + 96
+    label = _trim_text(draw, item["label"], FONT_LABEL_TOP, 490)
+    _draw_text(draw, (label_x, top + 8), label, FONT_LABEL_TOP, WHITE)
+
+    note = _trim_text(draw, _hero_note(item["label"], page_type), FONT_NOTE, 420)
+    _draw_text(draw, (label_x, top + 64), note, FONT_NOTE, GRAY)
+
+    _draw_bar(draw, label_x, top + 102, right - label_x - 16, 16, item["score"], accent)
+
+def _draw_rows(draw, items, accent):
+    left = 86
+    right = W - 86
+    label_x = 170
+    start_y = 510
+    row_gap = 166
+
+    for idx, item in enumerate(items, start=2):
+        y = start_y + (idx - 2) * row_gap
+
+        if idx > 2:
+            draw.line((left, y - 30, right, y - 30), fill=LINE_SOFT, width=1)
+
+        score_text = f"{item['score']}%"
+        score_x = right - _text_w(draw, score_text, FONT_SCORE)
+
+        label = _trim_text(draw, item["label"], FONT_LABEL, score_x - label_x - 26)
+
+        _draw_text(draw, (left, y + 2), f"{idx:02d}", FONT_INDEX, GRAY)
+        _draw_text(draw, (label_x, y), label, FONT_LABEL, WHITE)
+        _draw_text(draw, (score_x, y - 1), score_text, FONT_SCORE, accent)
+
+        _draw_bar(draw, label_x, y + 58, right - label_x, 12, item["score"], accent)
+
+def _draw_footer(draw, footer_text):
+    w = _text_w(draw, footer_text, FONT_FOOT)
+    _draw_text(draw, (W - 70 - w, H - 54), footer_text, FONT_FOOT, GRAY_DIM)
+
+# ─────────────────────────────
+# Public
+# ─────────────────────────────
+def _normalize_items(items, fallback_prefix, page_type):
+    cleaned = []
+    for i, item in enumerate(items[:5], start=1):
+        if isinstance(item, dict):
+            raw = item.get("label") or item.get("title") or f"{fallback_prefix} {i}"
+            score = item.get("score", 0)
+        else:
+            raw = f"{fallback_prefix} {i}"
+            score = 0
+
+        cleaned.append({
+            "label": _refine_label(raw, page_type),
+            "score": _score_to_int(score),
+        })
+
+    while len(cleaned) < 5:
+        idx = len(cleaned) + 1
+        cleaned.append({
+            "label": f"{fallback_prefix} {idx}",
+            "score": 0,
+        })
+
+    return cleaned
+
+def _make_page(title, items, out_path, page_type):
+    theme = PAGE_THEME[page_type]
+    accent = theme["accent"]
+
+    img = _make_background()
+    draw = ImageDraw.Draw(img)
+
+    _draw_header(draw, title, theme["subtitle"], theme["kicker"], accent)
+    _draw_hero(draw, items[0], accent, page_type)
+    _draw_rows(draw, items[1:], accent)
+    _draw_footer(draw, theme["footer"])
+
+    img.save(out_path, quality=95)
+
+def create_rank_set(news, poly, market=None, out_dir="output_rank"):
+    _ensure_dir(out_dir)
+
+    news_items = _normalize_items(news, "뉴스", "news")
+    poly_items = _normalize_items(poly, "폴리", "poly")
+    market_items = _normalize_items(market if market is not None else [], "반응", "market")
+
+    if market is None or len([x for x in market_items if x["score"] > 0]) == 0:
+        merged = []
+        for x in news_items:
+            merged.append({"label": x["label"], "score": x["score"]})
+        for x in poly_items:
+            merged.append({"label": x["label"], "score": x["score"]})
+
+        merged.sort(key=lambda z: z["score"], reverse=True)
+
+        dedup = []
+        seen = set()
+        for item in merged:
+            if item["label"] in seen:
+                continue
+            seen.add(item["label"])
+            dedup.append(item)
+            if len(dedup) == 5:
+                break
+
+        market_items = _normalize_items(dedup, "반응", "market")
+
+    p1 = os.path.join(out_dir, "rank_news.jpg")
+    p2 = os.path.join(out_dir, "rank_poly.jpg")
+    p3 = os.path.join(out_dir, "rank_market.jpg")
+
+    _make_page("뉴스", news_items, p1, "news")
+    _make_page("폴리마켓", poly_items, p2, "poly")
+    _make_page("시장 반응", market_items, p3, "market")
+
+    return [p1, p2, p3]
+
+if __name__ == "__main__":
+    sample_news = [
+        {"label": "유가 급등 압박", "score": 92},
+        {"label": "이란-미국 휴전 임박", "score": 88},
+        {"label": "비트코인 상승세", "score": 81},
+        {"label": "달러 강세 지속", "score": 78},
+        {"label": "금리 인하 논의", "score": 75},
     ]
 
+    sample_poly = [
+        {"label": "유가 120달러 도달?", "score": 91},
+        {"label": "이란-미국 휴전 4월?", "score": 87},
+        {"label": "트럼프 이란 구출 논란", "score": 83},
+        {"label": "호르무즈 정상화?", "score": 79},
+        {"label": "비트코인 7만달러 돌파?", "score": 76},
+    ]
 
-def _font(size: int, bold: bool = True):
-    for path in _font_candidates(bold):
-        if os.path.exists(path):
-            try:
-                return ImageFont.truetype(path, size)
-            except Exception:
-                pass
-    try:
-        fallback = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-        return ImageFont.truetype(fallback, size)
-    except Exception:
-        return ImageFont.load_default()
+    sample_market = [
+        {"label": "유가 상승 압력", "score": 91},
+        {"label": "환율 변동성", "score": 84},
+        {"label": "비트코인 강세", "score": 78},
+        {"label": "금값 반응", "score": 74},
+        {"label": "금리 압박", "score": 71},
+    ]
 
-
-def _background() -> Image.Image:
-    img = Image.new("RGB", (W, H), BG_TOP)
-    px = img.load()
-    for y in range(H):
-        r = y / max(1, H - 1)
-        if r < 0.55:
-            rr = r / 0.55
-            color = (
-                int(BG_TOP[0] * (1 - rr) + BG_MID[0] * rr),
-                int(BG_TOP[1] * (1 - rr) + BG_MID[1] * rr),
-                int(BG_TOP[2] * (1 - rr) + BG_MID[2] * rr),
-            )
-        else:
-            rr = (r - 0.55) / 0.45
-            color = (
-                int(BG_MID[0] * (1 - rr) + BG_BOTTOM[0] * rr),
-                int(BG_MID[1] * (1 - rr) + BG_BOTTOM[1] * rr),
-                int(BG_MID[2] * (1 - rr) + BG_BOTTOM[2] * rr),
-            )
-        for x in range(W):
-            px[x, y] = color
-
-    rgba = img.convert("RGBA")
-    overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    d = ImageDraw.Draw(overlay)
-
-    for i in range(8):
-        alpha = max(12, 34 - i * 3)
-        d.ellipse(
-            (
-                700 - i * 28,
-                -140 - i * 18,
-                1250 + i * 24,
-                430 + i * 18,
-            ),
-            outline=(255, 255, 255, alpha),
-            width=2,
-        )
-
-    for i in range(150):
-        a = int(115 * (1 - i / 150))
-        d.line([(0, i), (W, i)], fill=(0, 0, 0, a))
-
-    glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    gd = ImageDraw.Draw(glow)
-    gd.ellipse((700, 50, 1180, 530), fill=(66, 108, 255, 44))
-    gd.ellipse((760, 660, 1160, 1060), fill=(41, 209, 152, 30))
-    glow = glow.filter(ImageFilter.GaussianBlur(45))
-
-    rgba = Image.alpha_composite(rgba, glow)
-    rgba = Image.alpha_composite(rgba, overlay)
-    return rgba.convert("RGB")
-
-
-def _score_color(score: int):
-    if score >= 85:
-        return (255, 92, 92)
-    if score >= 72:
-        return (255, 171, 79)
-    if score >= 58:
-        return (255, 211, 99)
-    return (100, 214, 255)
-
-
-def _fit_single_line(draw, text: str, max_width: int, start: int, minimum: int, bold: bool = True):
-    for size in range(start, minimum - 1, -2):
-        font = _font(size, bold=bold)
-        box = draw.textbbox((0, 0), text, font=font)
-        if (box[2] - box[0]) <= max_width:
-            return font
-    return _font(minimum, bold=bold)
-
-
-def _wrap_text(draw, text: str, font, max_width: int, max_lines: int = 2):
-    words = str(text).split()
-    if not words:
-        return [""]
-    lines = []
-    current = ""
-    for word in words:
-        candidate = word if not current else f"{current} {word}"
-        box = draw.textbbox((0, 0), candidate, font=font)
-        if (box[2] - box[0]) <= max_width:
-            current = candidate
-        else:
-            if current:
-                lines.append(current)
-            current = word
-            if len(lines) >= max_lines - 1:
-                break
-    if current:
-        lines.append(current)
-    lines = lines[:max_lines]
-    if len(lines) == max_lines and len(words) > len(" ".join(lines).split()):
-        last = lines[-1]
-        if len(last) >= 2:
-            lines[-1] = last[:-1].rstrip() + "…"
-    return lines
-
-
-def _normalize_items(items: Optional[List[Dict]], limit: int = 5):
-    out = []
-    for raw in items or []:
-        title = str(raw.get("title", "")).strip()
-        if not title:
-            continue
-        try:
-            score = int(round(float(raw.get("score", 0))))
-        except Exception:
-            score = 0
-        score = max(0, min(100, score))
-        meta = str(raw.get("meta", "")).strip()
-        out.append({"title": title, "score": score, "meta": meta})
-    return out[:limit]
-
-
-def _draw_header(draw: ImageDraw.ImageDraw, kind: str, accent):
-    brand_font = _font(28, False)
-    chip_font = _font(28, True)
-    title_font = _font(72, True)
-    sub_font = _font(30, False)
-
-    draw.text((60, 52), "jadonnam market board", font=brand_font, fill=TEXT_FAINT)
-    chip_w = draw.textbbox((0, 0), kind, font=chip_font)[2] + 48
-    draw.rounded_rectangle((60, 104, 60 + chip_w, 164), radius=20, fill=(15, 22, 37), outline=accent, width=2)
-    draw.text((84, 118), kind, font=chip_font, fill=accent)
-
-    draw.text((60, 212), kind, font=title_font, fill=TEXT_MAIN)
-    draw.text((60, 292), SUBTITLES.get(kind, "핵심 순위 카드"), font=sub_font, fill=TEXT_SUB)
-
-    draw.line((60, 345, W - 60, 345), fill=LINE_SOFT, width=2)
-
-
-def _draw_rank_badge(draw, x, y, rank, accent):
-    badge_fill = (18, 25, 42)
-    draw.rounded_rectangle((x, y, x + 72, y + 72), radius=24, fill=badge_fill, outline=accent, width=2)
-    font = _font(34, True)
-    box = draw.textbbox((0, 0), str(rank), font=font)
-    tw = box[2] - box[0]
-    th = box[3] - box[1]
-    draw.text((x + (72 - tw) / 2, y + (72 - th) / 2 - 3), str(rank), font=font, fill=TEXT_MAIN)
-
-
-def _draw_card(draw, x, y, w, h, rank, title, score, accent, meta=""):
-    draw.rounded_rectangle((x, y, x + w, y + h), radius=34, fill=CARD_BG, outline=CARD_BORDER, width=2)
-    draw.rounded_rectangle((x + 1, y + 1, x + w - 1, y + h - 1), radius=34, outline=(255, 255, 255, 10), width=1)
-    _draw_rank_badge(draw, x + 26, y + 28, rank, accent)
-
-    score_color = _score_color(score)
-    pct_font = _font(42, True)
-    pct_text = f"{score}%"
-    pct_box = draw.textbbox((0, 0), pct_text, font=pct_font)
-    pct_w = pct_box[2] - pct_box[0]
-    draw.text((x + w - 32 - pct_w, y + 34), pct_text, font=pct_font, fill=score_color)
-
-    title_area_x = x + 118
-    title_area_w = w - 118 - 160
-    dummy = Image.new("RGB", (10, 10))
-    dd = ImageDraw.Draw(dummy)
-    title_font = _fit_single_line(dd, title, title_area_w, 40, 28, True)
-    lines = _wrap_text(dd, title, title_font, title_area_w, max_lines=2)
-    line_h = title_font.size + 10
-    ty = y + 28
-    for line in lines:
-        draw.text((title_area_x, ty), line, font=title_font, fill=TEXT_MAIN)
-        ty += line_h
-
-    if meta:
-        meta_font = _font(24, False)
-        meta_lines = _wrap_text(dd, meta, meta_font, w - 64, max_lines=1)
-        draw.text((x + 30, y + h - 76), meta_lines[0], font=meta_font, fill=TEXT_SUB)
-
-    bar_x = x + 30
-    bar_y = y + h - 48
-    bar_w = w - 60
-    bar_h = 16
-    draw.rounded_rectangle((bar_x, bar_y, bar_x + bar_w, bar_y + bar_h), radius=8, fill=(34, 42, 60))
-    fill_w = max(12, int(bar_w * (score / 100.0))) if score > 0 else 0
-    if fill_w > 0:
-        draw.rounded_rectangle((bar_x, bar_y, bar_x + fill_w, bar_y + bar_h), radius=8, fill=score_color)
-
-
-def create_rank_card(kind: str, items: List[Dict], path: str):
-    accent = ACCENTS.get(kind, (120, 180, 255))
-    img = _background().convert("RGBA")
-    draw = ImageDraw.Draw(img)
-    _draw_header(draw, kind, accent)
-
-    items = _normalize_items(items, limit=5)
-    visible_count = max(1, min(5, len(items)))
-    card_h = 154
-    gap = 28 if visible_count >= 5 else 34
-    total_h = visible_count * card_h + (visible_count - 1) * gap
-    start_y = 400 if visible_count == 5 else int((H - total_h) / 2) + 40
-
-    for idx, item in enumerate(items):
-        y = start_y + idx * (card_h + gap)
-        _draw_card(
-            draw,
-            48,
-            y,
-            W - 96,
-            card_h,
-            idx + 1,
-            item["title"],
-            item["score"],
-            accent,
-            item.get("meta", ""),
-        )
-
-    if not items:
-        empty_font = _font(34, False)
-        draw.text((60, 470), "표시할 데이터가 없습니다.", font=empty_font, fill=TEXT_SUB)
-
-    footer_font = _font(24, False)
-    draw.text((60, H - 58), "auto ranked by issue intensity · jadonnam", font=footer_font, fill=TEXT_FAINT)
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    img.convert("RGB").save(path, quality=95)
-    return path
-
-
-def create_rank_set(news_items: List[Dict], poly_items: List[Dict], market_items: Optional[List[Dict]] = None, out_dir: str = OUT_DEFAULT):
-    os.makedirs(out_dir, exist_ok=True)
-    n = create_rank_card("뉴스", news_items, os.path.join(out_dir, "news_rank.png"))
-    p = create_rank_card("폴리마켓", poly_items, os.path.join(out_dir, "poly_rank.png"))
-    m = create_rank_card("시장 반응", market_items or [], os.path.join(out_dir, "market_rank.png"))
-    return [n, p, m]
+    print(create_rank_set(sample_news, sample_poly, sample_market, out_dir="output_rank"))
