@@ -369,3 +369,8 @@ def main():
 
 if __name__ == "__main__":
     main()
+if __name__ == "__main__":
+    news_top = fetch_news_top5()
+    poly_top = fetch_poly_top5()
+
+    send_regular_rank_cards(news_top, poly_top)
