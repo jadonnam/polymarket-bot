@@ -52,6 +52,10 @@ Composition rules:
 - no watermark
 
 Important style rule:
+- reaction meme face like viral internet screenshot
+- captured mid-reaction moment
+- slightly awkward realistic expression
+- unfiltered emotional reaction
 - The emotion should be slightly over the top, like a meme screenshot
 - But the image must still feel like a real photographed moment
 - Avoid generic AI poster style
