@@ -1,37 +1,27 @@
-[jadonnam 최종 팩]
+[jadonnam 최종 한글팩]
 
-구성
-- main_master_v3.py        : 전체 흐름 제어
-- rank_card_v3.py         : 2~4페이지 자동 생성
-- card_v3.py              : 속보 전용 카드 생성
-- prompt_bank_v3.py       : 속보 이미지 주제/프롬프트 보조
-- telegram_new.py         : 텔레그램 전송
-- assets/                 : 상단 아이콘
+덮어쓸 파일
+- main_master_v3.py
+- rank_card_v3.py
+- assets/icon_news.png
+- assets/icon_poly.png
+- assets/icon_market.png
 
-최종 구조
-- 속보: 자동 업로드 유지
-- 정규 08시 / 19시: 2~4페이지 카드만 텔레그램 자동 전송
-- 1페이지는 수동 제작
-- 2페이지: 뉴스 TOP 5
-- 3페이지: 폴리마켓 TOP 5
-- 4페이지: 시장 반응 요약 TOP 5
+핵심 수정
+- 2~4페이지 상단 라벨 완전 한글화
+  - 뉴스
+  - 폴리마켓
+  - 시장 반응
+- 워터마크 제거
+- 빈 순위(- / 0%) 숨김
+- 항목 수가 적어도 카드가 비어 보이지 않도록 자동 간격 조정
+- 폰트/퍼센트/게이지 크기 키움
+- 영어 잘림 최소화, 한국어 라벨 우선
+- 정규 시간에는 2~4페이지만 텔레그램 전송
+- 속보 자동 업로드 구조는 유지
 
-중요
-- 2~4페이지는 AI 이미지 비용 없음
-- 속보 이미지는 image_generator_new.py 의 safe_generate_bg 사용
-- 인스타 자동 업로드는 속보만 유지
-- 텔레그램 채널에는 정규 시간마다 2~4페이지만 전송
-
-필요 환경변수
-- TELEGRAM_BOT_TOKEN
-- TELEGRAM_CHAT_ID
-- INSTAGRAM_USERNAME
-- INSTAGRAM_PASSWORD
-- INSTAGRAM_SESSION_PATH (선택)
-- USE_INSTAGRAM_FOR_BREAKING=true/false (선택)
-
-적용 방법
+적용 순서
 1) project 폴더에 압축 해제 후 덮어쓰기
 2) git add .
-3) git commit -m "apply jadonnam final pack"
+3) git commit -m "improve korean rank cards"
 4) git push
