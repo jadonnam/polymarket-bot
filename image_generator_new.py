@@ -1,6 +1,6 @@
 import os
-import base64
 import hashlib
+import requests
 from openai import OpenAI
 from PIL import Image, ImageDraw, ImageFilter
 
@@ -32,69 +32,69 @@ Rules:
 SCENE_VARIANTS = {
     "btc_moon": [
         "Young Korean male trader in dark suit, ecstatic disbelief, eyes wide, strong bitcoin rally mood, dark luxury room, glowing gold-blue reflections",
-        "Korean investor with shocked smile, phone in hand, bitcoin glow in background, dark premium finance thumbnail"
+        "Korean investor with shocked smile, phone in hand, bitcoin glow in background, dark premium finance thumbnail",
     ],
     "btc_panic": [
         "Korean trader in suit with panic expression, hands on head, red bearish mood, dark trading room",
-        "Young Korean investor staring in horror at phone, cold red-blue lighting, crypto crash mood"
+        "Young Korean investor staring in horror at phone, cold red-blue lighting, crypto crash mood",
     ],
     "oil_shock": [
         "Shocked Korean businessman, industrial orange-black background, oil refinery glow, fuel price shock mood",
-        "Korean office worker with stressed expression, dark industrial backdrop, oil crisis mood"
+        "Korean office worker with stressed expression, dark industrial backdrop, oil crisis mood",
     ],
     "oil_relief": [
-        "Korean businessman with slight relieved expression, warm sunrise over tanker route, calmer oil market mood"
+        "Korean businessman with slight relieved expression, warm sunrise over tanker route, calmer oil market mood",
     ],
     "gold_rush": [
-        "Korean investor with intense satisfied smile, gold bars glowing behind him, dark luxury vault"
+        "Korean investor with intense satisfied smile, gold bars glowing behind him, dark luxury vault",
     ],
     "rate_cut_doubt": [
-        "Korean finance professional with worried macro expression, dark blue finance room, tense rate market mood"
+        "Korean finance professional with worried macro expression, dark blue finance room, tense rate market mood",
     ],
     "rate_cut_hype": [
-        "Korean trader with stunned hopeful grin, dark premium finance room, upward blue-green glow"
+        "Korean trader with stunned hopeful grin, dark premium finance room, upward blue-green glow",
     ],
     "trump_tariff": [
-        "Donald Trump with aggressive determined expression, dark dramatic backdrop, tariff tension mood"
+        "Donald Trump with aggressive determined expression, dark dramatic backdrop, tariff tension mood",
     ],
     "trump_deal_positive": [
-        "Donald Trump with smug victorious grin, luxury boardroom mood, deal success energy"
+        "Donald Trump with smug victorious grin, luxury boardroom mood, deal success energy",
     ],
     "trump_deal_negative": [
-        "Donald Trump with irritated tense face, dark negotiation room, failed deal mood"
+        "Donald Trump with irritated tense face, dark negotiation room, failed deal mood",
     ],
     "inflation_shock": [
-        "Korean office worker checking receipt with horrified face, inflation pain mood, dark warm lighting"
+        "Korean office worker checking receipt with horrified face, inflation pain mood, dark warm lighting",
     ],
     "bond_stress": [
-        "Senior Korean finance professional with tired stressed face, dark institutional trading room"
+        "Senior Korean finance professional with tired stressed face, dark institutional trading room",
     ],
     "stocks_up": [
-        "Korean trader with winning smile, green market glow, premium dark newsroom"
+        "Korean trader with winning smile, green market glow, premium dark newsroom",
     ],
     "stocks_down": [
-        "Korean investor with stressed grimace, dark bear market room, red market glow"
+        "Korean investor with stressed grimace, dark bear market room, red market glow",
     ],
     "trade_tension": [
-        "Korean executive with tense face at cargo port, orange industrial darkness, trade war stress"
+        "Korean executive with tense face at cargo port, orange industrial darkness, trade war stress",
     ],
     "trade_deal_hype": [
-        "Korean businessman with explosive relieved reaction, dark premium boardroom, major deal closed mood"
+        "Korean businessman with explosive relieved reaction, dark premium boardroom, major deal closed mood",
     ],
     "mideast_tension": [
-        "Korean finance guy with grave shocked expression, orange-red geopolitical crisis glow, tanker route tension mood"
+        "Korean finance guy with grave shocked expression, orange-red geopolitical crisis glow, tanker route tension mood",
     ],
     "mideast_relief": [
-        "Korean businessman exhaling in relief, calm sunrise sea route, tension easing mood"
+        "Korean businessman exhaling in relief, calm sunrise sea route, tension easing mood",
     ],
     "eth_surge": [
-        "Young Korean trader with explosive excited expression, blue ethereum glow, dark premium finance room"
+        "Young Korean trader with explosive excited expression, blue ethereum glow, dark premium finance room",
     ],
     "eth_drop": [
-        "Korean crypto investor with defeated shocked face, blue-red panic light, dark crypto room"
+        "Korean crypto investor with defeated shocked face, blue-red panic light, dark crypto room",
     ],
     "market_general": [
-        "Korean finance professional with intense focused face, dark premium newsroom, strong market tension"
+        "Korean finance professional with intense focused face, dark premium newsroom, strong market tension",
     ],
 }
 
@@ -120,7 +120,7 @@ def build_prompt(visual_topic="market_general", seed_text="", context_title="", 
 
 
 def _fallback_gradient(output_path="bg.jpg", mood="dark"):
-    w, h = 1024, 1536
+    w, h = 1024, 1024
     img = Image.new("RGB", (w, h), (10, 12, 20))
     draw = ImageDraw.Draw(img)
 
@@ -152,6 +152,23 @@ def _is_positive_topic(visual_topic="", context_title="", context_desc=""):
     return pos > neg
 
 
+def _save_image_from_response(result, output_path):
+    if not result.data or len(result.data) == 0:
+        raise RuntimeError("이미지 생성 응답에 data가 없습니다.")
+
+    image_url = getattr(result.data[0], "url", None)
+    if not image_url:
+        raise RuntimeError("이미지 생성 응답에 url이 없습니다.")
+
+    response = requests.get(image_url, timeout=60)
+    response.raise_for_status()
+
+    with open(output_path, "wb") as f:
+        f.write(response.content)
+
+    return output_path
+
+
 def generate_bg(
     visual_topic="market_general",
     seed_text="",
@@ -176,15 +193,7 @@ def generate_bg(
         quality=IMAGE_QUALITY,
     )
 
-    image_b64 = result.data[0].b64_json
-    if not image_b64:
-        raise RuntimeError("이미지 생성 응답에 b64_json이 없습니다.")
-
-    image_bytes = base64.b64decode(image_b64)
-
-    with open(output_path, "wb") as f:
-        f.write(image_bytes)
-
+    _save_image_from_response(result, output_path)
     print(f"[IMAGE] saved: {output_path}")
     return output_path
 
@@ -227,7 +236,12 @@ def generate_carousel_bgs(visual_topic, seed_text, context_title="", context_des
         output_path = f"bg_c{i}.jpg"
         try:
             variant_seed = f"{seed_text}_{i}"
-            prompt = COMMON_BASE + f"\nContext title: {context_title}\nContext desc: {context_desc[:140]}\n\nScene:\n{_stable_pick(variants, variant_seed)}"
+            prompt = (
+                COMMON_BASE
+                + f"\nContext title: {context_title}"
+                + f"\nContext desc: {context_desc[:140]}"
+                + f"\n\nScene:\n{_stable_pick(variants, variant_seed)}"
+            )
 
             print(f"[IMAGE CAROUSEL] card={i} topic={visual_topic}")
 
@@ -238,14 +252,7 @@ def generate_carousel_bgs(visual_topic, seed_text, context_title="", context_des
                 quality=IMAGE_QUALITY,
             )
 
-            image_b64 = result.data[0].b64_json
-            if not image_b64:
-                raise RuntimeError("캐러셀 이미지 응답에 b64_json이 없습니다.")
-
-            image_bytes = base64.b64decode(image_b64)
-            with open(output_path, "wb") as f:
-                f.write(image_bytes)
-
+            _save_image_from_response(result, output_path)
             print(f"[IMAGE CAROUSEL] saved: {output_path}")
             paths.append(output_path)
 
