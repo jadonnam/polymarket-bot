@@ -267,7 +267,7 @@ def main():
         send_regular_rank_cards(news_top, poly_top)
         return
     print("[스케줄] 이번 회차 스킵")
-
+if __name__ == "__main__":     news_top = fetch_news_top5()     poly_top = fetch_poly_top5()     send_regular_rank_cards(news_top, poly_top)
 
 if __name__ == "__main__":
     main()
