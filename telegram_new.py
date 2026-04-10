@@ -1,33 +1,63 @@
+
 import os
+import json
 import requests
 
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 
+def _api(method: str) -> str:
+    if not BOT_TOKEN:
+        raise RuntimeError("TELEGRAM_BOT_TOKEN 없음")
+    return f"https://api.telegram.org/bot{BOT_TOKEN}/{method}"
 
-def send_image(image_path, caption=None):
-    if not BOT_TOKEN or not CHAT_ID:
-        raise RuntimeError("TELEGRAM_BOT_TOKEN 또는 TELEGRAM_CHAT_ID 환경변수 없음")
+def send_message(text: str):
+    if not CHAT_ID:
+        print("[텔레그램] CHAT_ID 없음")
+        return
+    r = requests.post(_api("sendMessage"), data={"chat_id": CHAT_ID, "text": text}, timeout=30)
+    print("[텔레그램 메시지]", r.status_code, r.text[:200])
 
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
-
+def send_image(image_path: str, caption: str = ""):
+    if not CHAT_ID:
+        print("[텔레그램] CHAT_ID 없음")
+        return
     with open(image_path, "rb") as f:
-        files = {"photo": f}
-        data = {"chat_id": CHAT_ID}
-        if caption:
-            data["caption"] = caption
-        res = requests.post(url, files=files, data=data)
+        r = requests.post(
+            _api("sendPhoto"),
+            data={"chat_id": CHAT_ID, "caption": caption},
+            files={"photo": f},
+            timeout=60
+        )
+    print("[텔레그램 이미지]", r.status_code, r.text[:200])
 
-    print("텔레그램 응답:", res.status_code, res.text[:200])
-    return res
-
-
-def send_caption(text):
-    """텍스트만 따로 전송"""
-    if not BOT_TOKEN or not CHAT_ID:
+def send_media_group(image_paths, caption=""):
+    if not CHAT_ID:
+        print("[텔레그램] CHAT_ID 없음")
         return
 
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    data = {"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"}
-    res = requests.post(url, data=data)
-    print("텔레그램 텍스트 응답:", res.status_code)
+    files = {}
+    media = []
+
+    for idx, path in enumerate(image_paths):
+        key = f"file{idx}"
+        files[key] = open(path, "rb")
+        item = {"type": "photo", "media": f"attach://{key}"}
+        if idx == 0 and caption:
+            item["caption"] = caption
+        media.append(item)
+
+    try:
+        r = requests.post(
+            _api("sendMediaGroup"),
+            data={"chat_id": CHAT_ID, "media": json.dumps(media, ensure_ascii=False)},
+            files=files,
+            timeout=90
+        )
+        print("[텔레그램 미디어그룹]", r.status_code, r.text[:200])
+    finally:
+        for f in files.values():
+            try:
+                f.close()
+            except Exception:
+                pass
