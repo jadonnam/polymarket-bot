@@ -1,3 +1,4 @@
+
 import os
 import json
 import re
@@ -16,83 +17,33 @@ SEARCH_QUERY = (
     'OR "iran" OR "israel" OR "ceasefire" OR "war" OR "hormuz" OR "dollar" OR "fx" OR "won")'
 )
 
-# ─────────────────────────────
-# Trusted source policy
-# ─────────────────────────────
 TRUSTED_DOMAINS = {
-    "reuters.com",
-    "bloomberg.com",
-    "cnbc.com",
-    "wsj.com",
-    "ft.com",
-    "apnews.com",
-    "bbc.com",
-    "finance.yahoo.com",
-    "marketwatch.com",
-    "investing.com",
-    "coindesk.com",
-    "theblock.co",
-    "yna.co.kr",
-    "english.yna.co.kr",
+    "reuters.com", "bloomberg.com", "cnbc.com", "wsj.com", "ft.com",
+    "apnews.com", "bbc.com", "finance.yahoo.com", "marketwatch.com",
+    "investing.com", "coindesk.com", "theblock.co", "yna.co.kr", "english.yna.co.kr",
 }
-
 TRUSTED_SOURCE_NAMES = {
-    "Reuters",
-    "Bloomberg",
-    "CNBC",
-    "The Wall Street Journal",
-    "WSJ",
-    "Financial Times",
-    "Associated Press",
-    "AP News",
-    "BBC News",
-    "Yahoo Finance",
-    "MarketWatch",
-    "Investing.com",
-    "CoinDesk",
-    "The Block",
-    "Yonhap News Agency",
-    "연합뉴스",
+    "Reuters", "Bloomberg", "CNBC", "The Wall Street Journal", "WSJ",
+    "Financial Times", "Associated Press", "AP News", "BBC News",
+    "Yahoo Finance", "MarketWatch", "Investing.com", "CoinDesk",
+    "The Block", "Yonhap News Agency", "연합뉴스",
 }
-
 BLOCKED_DOMAINS = {
-    "youtube.com",
-    "youtu.be",
-    "tiktok.com",
-    "instagram.com",
-    "medium.com",
-    "substack.com",
-    "blogspot.com",
-    "wordpress.com",
-    "pinterest.com",
-    "reddit.com",
-    "fool.com",
-    "benzinga.com",
-    "seekingalpha.com",
-    "zerohedge.com",
-    "cointelegraph.com",
-    "cryptopotato.com",
-    "u.today",
+    "youtube.com", "youtu.be", "tiktok.com", "instagram.com", "medium.com",
+    "substack.com", "blogspot.com", "wordpress.com", "pinterest.com",
+    "reddit.com", "fool.com", "benzinga.com", "seekingalpha.com",
+    "zerohedge.com", "cointelegraph.com", "cryptopotato.com", "u.today",
     "dailyhodl.com",
 }
-
 BLOCK_WORDS = [
     "review", "travel", "fashion", "sports", "movie", "music",
     "celebrity gossip", "entertainment", "restaurant", "horoscope",
     "lifestyle", "shopping", "recipes", "recipe",
 ]
-
 LOW_QUALITY_PATTERNS = [
-    "live updates",
-    "live blog",
-    "opinion",
-    "newsletter",
-    "podcast",
-    "editorial",
-    "sponsored",
-    "advertisement",
+    "live updates", "live blog", "opinion", "newsletter", "podcast",
+    "editorial", "sponsored", "advertisement",
 ]
-
 MARKET_KEYWORDS = [
     "trump", "tariff", "trade deal", "bitcoin", "btc", "ethereum", "eth",
     "oil", "wti", "crude", "brent", "gold", "fed", "inflation", "cpi",
@@ -100,17 +51,12 @@ MARKET_KEYWORDS = [
     "israel", "war", "attack", "hormuz", "dollar", "fx", "won", "환율",
     "유가", "금리", "물가", "비트", "달러", "금값"
 ]
-
 HIGH_IMPACT_KEYWORDS = [
     "oil", "wti", "crude", "brent", "hormuz", "fed", "inflation", "cpi",
     "yield", "dollar", "fx", "won", "tariff", "bitcoin", "btc",
     "iran", "israel", "war", "attack", "ceasefire", "gold"
 ]
 
-
-# ─────────────────────────────
-# Basic file cache
-# ─────────────────────────────
 def load_cache():
     if not os.path.exists(CACHE_FILE):
         return {}
@@ -129,10 +75,8 @@ def get_cached_candidate():
     title = cache.get("title")
     desc = cache.get("description", "")
     saved_at = cache.get("saved_at")
-
     if not title or not saved_at:
         return None
-
     try:
         dt = datetime.fromisoformat(saved_at)
         if datetime.now(timezone.utc) - dt <= timedelta(hours=4):
@@ -145,13 +89,8 @@ def get_cached_candidate():
             }
     except Exception:
         return None
-
     return None
 
-
-# ─────────────────────────────
-# URL / source helpers
-# ─────────────────────────────
 def normalize_domain(url: str) -> str:
     try:
         host = urlparse(url).netloc.lower().strip()
@@ -162,14 +101,10 @@ def normalize_domain(url: str) -> str:
     return host
 
 def domain_is_trusted(domain: str) -> bool:
-    if not domain:
-        return False
-    return any(domain == d or domain.endswith("." + d) for d in TRUSTED_DOMAINS)
+    return bool(domain) and any(domain == d or domain.endswith("." + d) for d in TRUSTED_DOMAINS)
 
 def domain_is_blocked(domain: str) -> bool:
-    if not domain:
-        return False
-    return any(domain == d or domain.endswith("." + d) for d in BLOCKED_DOMAINS)
+    return bool(domain) and any(domain == d or domain.endswith("." + d) for d in BLOCKED_DOMAINS)
 
 def source_name_is_trusted(name: str) -> bool:
     name = (name or "").strip()
@@ -177,9 +112,7 @@ def source_name_is_trusted(name: str) -> bool:
         return False
     if name in TRUSTED_SOURCE_NAMES:
         return True
-    low = name.lower()
-    trusted_lows = {x.lower() for x in TRUSTED_SOURCE_NAMES}
-    return low in trusted_lows
+    return name.lower() in {x.lower() for x in TRUSTED_SOURCE_NAMES}
 
 def article_domain(article) -> str:
     return normalize_domain(article.get("url", "") or article.get("link", ""))
@@ -190,10 +123,6 @@ def article_source_name(article) -> str:
         return (src.get("name", "") or "").strip()
     return str(src or "").strip()
 
-
-# ─────────────────────────────
-# Content quality helpers
-# ─────────────────────────────
 def clean_spaces(text: str) -> str:
     return re.sub(r"\s+", " ", str(text or "")).strip()
 
@@ -214,10 +143,7 @@ def is_low_quality_text(article) -> bool:
     title = clean_spaces(article.get("title", ""))
     desc = clean_spaces(article.get("description", "") or article.get("content", "") or article.get("summary", ""))
     text = f"{title} {desc}".lower()
-
-    if len(title) < 18:
-        return True
-    if len(desc) < 40:
+    if len(title) < 18 or len(desc) < 40:
         return True
     if any(w in text for w in BLOCK_WORDS):
         return True
@@ -230,7 +156,6 @@ def published_recent_enough(article, hours=36) -> bool:
     if not raw:
         return True
     text = str(raw).strip()
-
     try:
         if text.endswith("Z"):
             dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
@@ -246,97 +171,59 @@ def dedup_key(article) -> str:
     title = clean_spaces(article.get("title", "")).lower()
     title = re.sub(r"[^a-z0-9가-힣\s]", " ", title)
     title = re.sub(r"\s+", " ", title).strip()
-
-    # 너무 긴 제목은 앞부분 기준
-    title = title[:120]
-    return title
+    return title[:120]
 
 def trusted_article(article) -> bool:
     domain = article_domain(article)
     source_name = article_source_name(article)
-
     if domain_is_blocked(domain):
         return False
+    return domain_is_trusted(domain) or source_name_is_trusted(source_name)
 
-    if domain_is_trusted(domain):
-        return True
-
-    if source_name_is_trusted(source_name):
-        return True
-
-    return False
-
-
-# ─────────────────────────────
-# Scoring
-# ─────────────────────────────
 def score_article(article):
     title = clean_spaces(article.get("title", ""))
     desc = clean_spaces(article.get("description", "") or article.get("content", "") or article.get("summary", ""))
     domain = article_domain(article)
     source_name = article_source_name(article)
     text = f"{title} {desc}".lower()
-
     score = 0
-
-    # trust
     if domain_is_trusted(domain):
         score += 40
     if source_name_is_trusted(source_name):
         score += 20
     if published_recent_enough(article, hours=24):
         score += 10
-
-    # impact
     for k in MARKET_KEYWORDS:
         if k in text:
             score += 4
-
     for k in HIGH_IMPACT_KEYWORDS:
         if k in text:
             score += 5
-
-    # numbers matter in market news
     if re.search(r"\d", text):
         score += 8
-
-    # cleaner copy usually better
     if len(title) >= 28:
         score += 6
     if len(desc) >= 70:
         score += 6
-
-    # penalties
     for w in BLOCK_WORDS:
         if w in text:
             score -= 15
-
     for p in LOW_QUALITY_PATTERNS:
         if p in text:
             score -= 12
-
     if "?" in title:
         score -= 6
-
     if len(title) < 18:
         score -= 12
-
     if len(desc) < 40:
         score -= 12
-
     return score
 
-
-# ─────────────────────────────
-# Fetch / filter pipeline
-# ─────────────────────────────
 def fetch_news(limit=40):
     if not API_KEY:
         return []
-
     url = "https://newsapi.org/v2/everything"
     from_date = (datetime.now(timezone.utc) - timedelta(hours=36)).strftime("%Y-%m-%dT%H:%M:%SZ")
-
     params = {
         "q": SEARCH_QUERY,
         "language": "en",
@@ -345,69 +232,47 @@ def fetch_news(limit=40):
         "from": from_date,
         "apiKey": API_KEY,
     }
-
     try:
         res = requests.get(url, params=params, timeout=20)
         data = res.json()
     except Exception:
         return []
-
     if data.get("status") != "ok":
         print("뉴스 API 응답 이상:", data)
         return []
-
     articles = data.get("articles", []) or []
-
-    filtered = []
-    seen = set()
-
+    filtered, seen = [], set()
     for article in articles:
         title = clean_spaces(article.get("title", ""))
         if not title:
             continue
-
         if not trusted_article(article):
             continue
-
         if not has_market_impact(article):
             continue
-
         if not has_high_impact(article):
             continue
-
         if is_low_quality_text(article):
             continue
-
         if not published_recent_enough(article, hours=36):
             continue
-
         key = dedup_key(article)
         if not key or key in seen:
             continue
         seen.add(key)
-
         filtered.append(article)
-
     filtered.sort(key=score_article, reverse=True)
     return filtered[:limit]
 
-
-# ─────────────────────────────
-# Legacy-compatible single candidate
-# ─────────────────────────────
 def get_news_candidate():
     articles = fetch_news(limit=30)
-
     if not articles:
         return get_cached_candidate()
-
     best = articles[0]
     title = best.get("title") or ""
     desc = best.get("description") or best.get("content") or ""
-
     if not title:
         return get_cached_candidate()
-
     save_cache({
         "title": title,
         "description": desc,
@@ -416,7 +281,6 @@ def get_news_candidate():
         "publishedAt": best.get("publishedAt", ""),
         "saved_at": datetime.now(timezone.utc).isoformat(),
     })
-
     return {
         "title": title,
         "description": desc,

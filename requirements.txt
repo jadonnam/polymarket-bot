@@ -1,4 +1,5 @@
-openai
-instagrapi
+moviepy
+imageio
+imageio-ffmpeg
 Pillow
-requests
+numpy
