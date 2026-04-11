@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 import base64
@@ -8,16 +9,17 @@ from pathlib import Path
 
 import numpy as np
 import requests
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont, ImageOps
 
 try:
-    from moviepy.editor import AudioClip, ImageClip, concatenate_videoclips
+    from moviepy.editor import AudioClip, AudioFileClip, ImageClip, concatenate_videoclips
 except Exception:
-    from moviepy import AudioClip, ImageClip, concatenate_videoclips
+    from moviepy import AudioClip, AudioFileClip, ImageClip, concatenate_videoclips
 
 W, H = 1080, 1920
 BASE_DIR = os.path.dirname(__file__)
 FONT_DIR = os.path.join(BASE_DIR, "fonts")
+ASSETS_AUDIO = os.path.join(BASE_DIR, "assets", "audio", "bg.mp3")
 BOLD_PATH = os.path.join(FONT_DIR, "Pretendard-Bold.ttf")
 REG_PATH = os.path.join(FONT_DIR, "Pretendard-Regular.ttf")
 
@@ -73,37 +75,96 @@ def _wrap(draw, text, font, max_width):
 
 def _topic_keyword(text: str) -> str:
     t = (text or "").lower()
-    if any(k in t for k in ["유가", "oil", "wti", "crude", "brent", "호르무즈", "hormuz"]):
+    if any(k in t for k in ["유가", "oil", "wti", "crude", "brent", "호르무즈", "hormuz", "opec", "석유"]):
         return "oil"
-    if any(k in t for k in ["환율", "달러", "usd", "fx"]):
+    if any(k in t for k in ["환율", "달러", "usd", "fx", "won", "dollar", "원화", "외환"]):
         return "fx"
-    if any(k in t for k in ["비트", "bitcoin", "btc"]):
+    if any(k in t for k in ["비트", "bitcoin", "btc", "crypto", "eth", "이더", "가상자산"]):
         return "bitcoin"
-    if any(k in t for k in ["금리", "fed", "cpi", "inflation", "yield"]):
+    if any(k in t for k in ["금리", "fed", "cpi", "inflation", "yield", "연준", "물가", "채권"]):
         return "rates"
-    if any(k in t for k in ["중동", "전쟁", "휴전", "war", "iran", "israel"]):
+    if any(k in t for k in ["중동", "전쟁", "휴전", "war", "iran", "israel", "attack", "missile", "공습", "이란", "이스라엘"]):
         return "geopolitics"
+    if any(k in t for k in ["금", "gold", "safe haven", "안전자산"]):
+        return "gold"
     return "market"
 
 
-def _topic_prompt(hook_text: str) -> str:
+def _topic_prompt_variants(hook_text: str):
     key = _topic_keyword(hook_text)
-    if key == "oil":
-        scene = "A photorealistic night view of a large oil tanker moving through a narrow strait, tense industrial lights, dark blue sea, premium finance-news style, no text"
-    elif key == "fx":
-        scene = "A photorealistic macro-finance scene with glowing dollar and won exchange board reflections in a dark trading room, premium editorial style, no text"
-    elif key == "bitcoin":
-        scene = "A photorealistic dark trading desk with a large bitcoin coin and chart glow, dramatic but realistic finance media look, no text"
-    elif key == "rates":
-        scene = "A photorealistic central-bank style briefing room with rate chart glow and tense macro mood, premium editorial style, no text"
-    elif key == "geopolitics":
-        scene = "A photorealistic dark geopolitical tension scene with cargo ships and distant orange crisis glow, premium news-magazine style, no text"
-    else:
-        scene = "A photorealistic premium financial-news background, dark market screens, subtle chart lights, serious editorial mood, no text"
-    return (
-        f"{scene}. Vertical 9:16 composition. Leave the center-left area readable for Korean headline overlay. "
-        "No watermark, no UI, no poster typography, no collage, no split screen."
+    common = (
+        "Ultra-realistic editorial news photography, authentic camera look, natural lighting, "
+        "not CGI, not illustration, not poster, no text, no watermark, no collage, no UI, "
+        "no infographic, no fake screenshots, premium Reuters/Bloomberg magazine aesthetic, "
+        "clean composition for vertical 9:16, center-left and upper-center readable for Korean headline overlay."
     )
+    if key == "oil":
+        return [
+            f"Night photograph of a massive oil tanker moving through a narrow strategic strait, subtle industrial lights, dark blue sea, tense global energy atmosphere. {common}",
+            f"Realistic documentary-style photo of an offshore oil terminal and tanker at dusk, moody sky, restrained orange reflections on water, serious macro-news tone. {common}",
+            f"Photorealistic crude oil transport scene at night, large tanker, open water, distant port lights, high-end financial media style. {common}",
+        ]
+    if key == "fx":
+        return [
+            f"Photorealistic macro-finance newsroom photo with out-of-focus currency board lights, dollar and won mood, dark trading room reflections, human-shot editorial realism. {common}",
+            f"Realistic trading desk photo with foreign exchange monitors glowing softly in a dark room, no readable UI, serious financial tension, shallow depth of field. {common}",
+            f"Documentary-style photograph of a finance workstation at night, currency-market atmosphere, blue and amber highlights, premium editorial realism. {common}",
+        ]
+    if key == "bitcoin":
+        return [
+            f"Photorealistic crypto trading desk at night, multiple monitors casting realistic glow, premium editorial finance photo, restrained bitcoin visual cue, not flashy. {common}",
+            f"Dark realistic photograph of a professional market desk with crypto sentiment, moody screen reflections, cinematic but believable newsroom tone. {common}",
+            f"Human-shot editorial photo of a digital asset trading environment, low-key lighting, serious financial atmosphere, realistic camera grain. {common}",
+        ]
+    if key == "rates":
+        return [
+            f"Editorial macro-finance photograph of a central-bank style briefing room and bond-market mood, serious institutional atmosphere, realistic lighting, no text. {common}",
+            f"Realistic photo of a policy-news environment, rate-sensitive market atmosphere, dark blue and neutral lighting, premium financial magazine look. {common}",
+            f"Photorealistic economist workstation and macro charts glow in a dim room, restrained and believable, human-shot editorial composition. {common}",
+        ]
+    if key == "geopolitics":
+        return [
+            f"Realistic documentary-style night photo of geopolitical tension near a shipping route, distant orange glow on horizon, sea and industrial silhouettes, serious global-news tone. {common}",
+            f"Photorealistic editorial image of dark military-geopolitical tension over strategic waters, no visible combat, restrained crisis atmosphere, premium magazine realism. {common}",
+            f"Human-shot news-style photo of cargo ships and distant crisis glow at night, dramatic but believable, geopolitical market tension. {common}",
+        ]
+    if key == "gold":
+        return [
+            f"Photorealistic safe-haven market image, close-up of gold-toned reflections on a dark trading desk, premium editorial look, no text. {common}",
+            f"Realistic macro-finance photo with gold market atmosphere, restrained metallic highlights, dark premium magazine aesthetic. {common}",
+            f"Human-shot financial editorial image evoking safe-haven demand, luxurious but realistic tone, no artificial CGI look. {common}",
+        ]
+    return [
+        f"Photorealistic premium financial-news background, dark market atmosphere, soft screen reflections, serious editorial realism, believable human-shot composition. {common}",
+        f"Editorial finance magazine style photo with moody market screens and subtle city-night reflections, realistic and restrained. {common}",
+        f"Documentary-style macro market image, dark blue financial mood, premium newsroom photography, no text or UI. {common}",
+    ]
+
+
+def _cover_crop(img: Image.Image, target_w: int = W, target_h: int = H) -> Image.Image:
+    img = img.convert("RGB")
+    src_w, src_h = img.size
+    ratio = max(target_w / src_w, target_h / src_h)
+    new_size = (max(1, int(src_w * ratio)), max(1, int(src_h * ratio)))
+    img = img.resize(new_size, Image.LANCZOS)
+    left = max(0, (img.width - target_w) // 2)
+    top = max(0, (img.height - target_h) // 2)
+    return img.crop((left, top, left + target_w, top + target_h))
+
+
+def _tone_finish(img: Image.Image) -> Image.Image:
+    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    od = ImageDraw.Draw(overlay)
+    od.rectangle((0, 0, img.width, img.height), fill=(8, 12, 18, 24))
+    vignette = Image.new("L", img.size, 0)
+    vd = ImageDraw.Draw(vignette)
+    vd.ellipse((-180, -80, img.width + 180, img.height + 260), fill=180)
+    vignette = ImageOps.invert(vignette).filter(ImageFilter.GaussianBlur(120))
+    dark = Image.new("RGBA", img.size, (0, 0, 0, 70))
+    dark.putalpha(vignette)
+    out = Image.alpha_composite(img.convert("RGBA"), overlay)
+    out = Image.alpha_composite(out, dark)
+    return out.convert("RGB")
 
 
 def _generate_openai_intro_bg(hook_text: str, out_path: str) -> bool:
@@ -114,68 +175,116 @@ def _generate_openai_intro_bg(hook_text: str, out_path: str) -> bool:
         from openai import OpenAI
     except Exception:
         return False
+
+    prompts = _topic_prompt_variants(hook_text)
+    sizes = ["1024x1536", "1536x1024", "1024x1024"]
+
     try:
         client = OpenAI(api_key=api_key)
-        result = client.images.generate(
-            model=os.getenv("INTRO_IMAGE_MODEL", "gpt-image-1"),
-            prompt=_topic_prompt(hook_text),
-            size="1024x1536",
-        )
-        data = result.data[0]
-        if getattr(data, "b64_json", None):
-            raw = base64.b64decode(data.b64_json)
-        elif getattr(data, "url", None):
-            raw = requests.get(data.url, timeout=60).content
-        else:
-            return False
-        img = Image.open(BytesIO(raw)).convert("RGB")
-        img = img.resize((W, H), Image.LANCZOS)
-        img.save(out_path, quality=95)
-        return True
     except Exception as e:
-        print(f"[인트로 이미지 생성 실패] {repr(e)}")
+        print(f"[인트로 이미지 클라이언트 실패] {repr(e)}")
         return False
+
+    for prompt in prompts:
+        for size in sizes:
+            try:
+                result = client.images.generate(
+                    model=os.getenv("INTRO_IMAGE_MODEL", "gpt-image-1"),
+                    prompt=prompt,
+                    size=size,
+                )
+                data = result.data[0]
+                if getattr(data, "b64_json", None):
+                    raw = base64.b64decode(data.b64_json)
+                elif getattr(data, "url", None):
+                    raw = requests.get(data.url, timeout=60).content
+                else:
+                    continue
+                img = Image.open(BytesIO(raw)).convert("RGB")
+                img = _cover_crop(img)
+                img = _tone_finish(img)
+                img.save(out_path, quality=95)
+                print(f"[인트로 이미지 생성 성공] size={size}")
+                return True
+            except Exception as e:
+                print(f"[인트로 이미지 재시도] size={size} err={repr(e)}")
+                continue
+    return False
+
+
+def _film_noise(size=(W, H), strength=14):
+    noise = (np.random.rand(size[1], size[0], 3) * strength).astype(np.uint8)
+    return Image.fromarray(noise, "RGB")
 
 
 def _draw_topic_fallback(hook_text: str, out_path: str):
+    """
+    검은 화면 대신, 실제 사진 느낌에 가까운 편집형 배경을 강제로 생성한다.
+    완전한 실사 사진은 아니어도 영상 이탈을 막는 '뉴스 매거진 배경' 성격으로 설계.
+    """
     key = _topic_keyword(hook_text)
-    img = _gradient_bg((6, 9, 18), (12, 18, 34))
-    draw = ImageDraw.Draw(img)
-    accent = (247, 175, 74)
-    secondary = (88, 202, 182)
+    img = _gradient_bg((8, 12, 20), (18, 28, 44)).convert("RGBA")
+    glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    gd = ImageDraw.Draw(glow)
 
-    for r, alpha in [(420, 18), (300, 24), (180, 32)]:
-        circle = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        cdraw = ImageDraw.Draw(circle)
-        cdraw.ellipse((W - 260 - r, 260 - r, W - 260 + r, 260 + r), fill=(accent[0], accent[1], accent[2], alpha))
-        img = Image.alpha_composite(img.convert("RGBA"), circle).convert("RGB")
-
-    draw = ImageDraw.Draw(img)
     if key == "oil":
-        draw.rectangle((130, 1110, 910, 1145), fill=(27, 34, 52))
-        draw.polygon([(210, 1120), (520, 980), (840, 1120)], fill=(secondary[0], secondary[1], secondary[2]))
-        draw.rectangle((510, 760, 560, 1030), fill=accent)
-        draw.ellipse((495, 700, 575, 780), fill=accent)
-    elif key == "bitcoin":
-        draw.ellipse((620, 610, 970, 960), fill=(28, 32, 46), outline=accent, width=10)
-        big = _font(180, True)
-        draw.text((710, 645), "₿", fill=accent, font=big)
+        gd.ellipse((560, 60, 1250, 720), fill=(235, 152, 60, 32))
+        gd.rectangle((0, 1080, W, H), fill=(10, 36, 58, 170))
+        gd.polygon([(90, 1205), (300, 1145), (760, 1145), (990, 1200), (940, 1260), (180, 1260)], fill=(20, 24, 32, 255))
+        gd.rectangle((455, 980, 505, 1145), fill=(247, 175, 74, 215))
+        gd.rectangle((220, 1260, 880, 1274), fill=(90, 205, 182, 180))
     elif key == "fx":
-        big = _font(150, True)
-        draw.text((620, 720), "$", fill=accent, font=big)
-        draw.text((770, 760), "₩", fill=secondary, font=big)
+        gd.ellipse((650, 120, 1230, 680), fill=(56, 155, 255, 28))
+        for i in range(6):
+            x = 590 + i * 78
+            gd.rounded_rectangle((x, 760, x + 46, 1180), radius=12, fill=(25, 35, 52, 220))
+        gd.rectangle((120, 1180, 960, 1260), fill=(14, 18, 28, 170))
+        gd.line((140, 1100, 340, 1020, 520, 1080, 760, 910, 940, 980), fill=(88, 202, 182, 240), width=10)
+    elif key == "bitcoin":
+        gd.ellipse((650, 250, 980, 580), fill=(247, 175, 74, 30))
+        gd.ellipse((635, 560, 965, 890), fill=(28, 34, 46, 255), outline=(247, 175, 74, 240), width=12)
+        try:
+            big = _font(170, True)
+            temp = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+            td = ImageDraw.Draw(temp)
+            td.text((720, 600), "₿", fill=(247, 175, 74, 255), font=big)
+            img = Image.alpha_composite(img, temp)
+        except Exception:
+            pass
+        gd.rectangle((90, 1180, 980, 1260), fill=(14, 18, 28, 170))
     elif key == "rates":
-        draw.line((180, 1130, 920, 870), fill=secondary, width=14)
-        draw.line((740, 900, 920, 870), fill=secondary, width=14)
-        draw.line((875, 820, 920, 870), fill=secondary, width=14)
+        gd.ellipse((640, 180, 1140, 640), fill=(120, 170, 255, 28))
+        gd.rectangle((130, 1125, 950, 1245), fill=(14, 18, 28, 180))
+        gd.line((160, 1200, 330, 1105, 515, 1070, 700, 930, 930, 820), fill=(88, 202, 182, 235), width=14)
+        gd.line((870, 755, 930, 820), fill=(88, 202, 182, 235), width=14)
+        gd.line((850, 860, 930, 820), fill=(88, 202, 182, 235), width=14)
+    elif key == "geopolitics":
+        gd.ellipse((690, 120, 1230, 680), fill=(242, 111, 88, 34))
+        gd.rectangle((0, 1050, W, H), fill=(16, 20, 32, 190))
+        gd.polygon([(90, 1230), (210, 1090), (420, 1180), (610, 1040), (830, 1205), (1000, 1100), (1080, 1200), (1080, 1920), (0, 1920), (0, 1265)], fill=(28, 24, 36, 255))
+        gd.line((120, 1265, 980, 1265), fill=(247, 175, 74, 125), width=8)
+    elif key == "gold":
+        gd.ellipse((620, 160, 1200, 720), fill=(247, 175, 74, 36))
+        gd.rounded_rectangle((610, 860, 930, 1040), radius=30, fill=(140, 108, 40, 255))
+        gd.rounded_rectangle((520, 1010, 840, 1190), radius=30, fill=(166, 126, 54, 255))
+        gd.rectangle((120, 1200, 980, 1270), fill=(14, 18, 28, 180))
     else:
-        draw.line((170, 1160, 440, 1020, 660, 1070, 930, 860), fill=accent, width=16)
-        draw.ellipse((900, 830, 950, 880), fill=accent)
+        gd.ellipse((700, 120, 1250, 680), fill=(88, 202, 182, 28))
+        gd.rectangle((115, 1180, 980, 1260), fill=(14, 18, 28, 180))
+        gd.line((130, 1200, 320, 1110, 520, 1170, 700, 970, 940, 885), fill=(247, 175, 74, 235), width=14)
 
-    overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    od = ImageDraw.Draw(overlay)
-    od.rectangle((0, 0, W, H), fill=(0, 0, 0, 70))
-    img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
+    img = Image.alpha_composite(img, glow)
+    noise = _film_noise((W, H), strength=12).filter(ImageFilter.GaussianBlur(0.3)).convert("RGBA")
+    noise.putalpha(28)
+    img = Image.alpha_composite(img, noise)
+
+    # 상단, 하단 읽기 영역 확보
+    shade = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    sd = ImageDraw.Draw(shade)
+    sd.rectangle((0, 0, W, 720), fill=(0, 0, 0, 68))
+    sd.rectangle((0, 1380, W, H), fill=(0, 0, 0, 45))
+    img = Image.alpha_composite(img, shade).convert("RGB")
+    img = _tone_finish(img)
     img.save(out_path, quality=95)
 
 
@@ -269,7 +378,7 @@ def _prep(path: str, duration: float):
     return clip
 
 
-def _build_audio(duration: float):
+def _build_synth_audio(duration: float):
     def make_frame(t):
         tt = np.asarray(t)
         base = 0.012 * np.sin(2 * np.pi * 110 * tt)
@@ -282,8 +391,32 @@ def _build_audio(duration: float):
         if np.ndim(val) == 0:
             return [float(val), float(val)]
         return np.column_stack([val, val])
-
     return AudioClip(make_frame, duration=duration, fps=44100)
+
+
+def _build_audio(duration: float):
+    if os.path.exists(ASSETS_AUDIO):
+        try:
+            clip = AudioFileClip(ASSETS_AUDIO)
+            if clip.duration > duration:
+                return clip.subclip(0, duration)
+            # 짧은 오디오면 뒤에 무음 대신 합성음을 얇게 덧댄다
+            if abs(clip.duration - duration) < 0.05:
+                return clip
+            try:
+                loops = []
+                remaining = duration
+                while remaining > 0:
+                    seg = clip.subclip(0, min(clip.duration, remaining))
+                    loops.append(seg)
+                    remaining -= seg.duration
+                from moviepy.editor import concatenate_audioclips
+                return concatenate_audioclips(loops)
+            except Exception:
+                return clip
+        except Exception as e:
+            print(f"[외부 배경음 로드 실패] {repr(e)}")
+    return _build_synth_audio(duration)
 
 
 def build_reel(
