@@ -1,15 +1,6 @@
-[사용법]
-
-1. output_rank 폴더에 아래 파일 있어야 함:
-- rank_news.jpg
-- rank_poly.jpg
-- rank_market.jpg
-
-2. 실행
-python reels_maker_final.py
-
-3. 결과
-reel_output.mp4 생성됨
-
-Railway Start Command:
-python reels_maker_final.py
+news.py와 main_master_v3.py를 덮어쓰기하면 됩니다.
+- 뉴스 속보 필터 강화
+- trusted source + breaking keyword 조합 필수
+- 뉴스 속보 점수 기준 상향
+- 10분마다 체크 구조 유지
+- 스킵 로그 복원
