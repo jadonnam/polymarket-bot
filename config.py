@@ -1,4 +1,6 @@
-TELEGRAM_BOT_TOKEN = "8605896650:AAECzR130hjNPSks1InkiCaRggasAHG1lc"
-TELEGRAM_CHAT_ID = "-1003659436382"
+import os
 
-CHECK_INTERVAL = 1800
+TELEGRAM_BOT_TOKEN = (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
+TELEGRAM_CHAT_ID = (os.getenv("TELEGRAM_CHAT_ID") or "").strip()
+
+CHECK_INTERVAL = int((os.getenv("CHECK_INTERVAL") or "1800").strip())

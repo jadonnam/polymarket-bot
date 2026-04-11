@@ -1,3 +1,6 @@
 __pycache__/
-output/
+*.pyc
+output_rank/
 .env
+*.log
+.DS_Store

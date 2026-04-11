@@ -17,21 +17,32 @@ ACCENT_NEWS = (214, 221, 232)
 ACCENT_POLY = (247, 175, 74)
 ACCENT_MARKET = (88, 202, 182)
 
-FONT_DIR = "fonts"
+BASE_DIR = os.path.dirname(__file__)
+FONT_DIR = os.path.join(BASE_DIR, "fonts")
 
 
 # item shape: {label:str, score:int, delta:int|None, meta:str|None}
 
 
-def _font_path(bold: bool = True) -> str:
-    return os.path.join(FONT_DIR, "Pretendard-Bold.ttf" if bold else "Pretendard-Regular.ttf")
+def _font_candidates(bold: bool = True):
+    base = "Pretendard-Bold.ttf" if bold else "Pretendard-Regular.ttf"
+    stem, ext = os.path.splitext(base)
+    return [
+        os.path.join(FONT_DIR, base),
+        os.path.join(BASE_DIR, base),
+        os.path.join(BASE_DIR, f"{stem}(1){ext}"),
+        os.path.join(FONT_DIR, f"{stem}(1){ext}"),
+    ]
 
 
 def get_font(size: int, bold: bool = True):
-    try:
-        return ImageFont.truetype(_font_path(bold), size)
-    except Exception:
-        return ImageFont.load_default()
+    for path in _font_candidates(bold):
+        try:
+            if os.path.exists(path):
+                return ImageFont.truetype(path, size)
+        except Exception:
+            pass
+    return ImageFont.load_default()
 
 
 def now_kst_text() -> str:
