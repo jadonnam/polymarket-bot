@@ -1,9 +1,9 @@
 requests
 Pillow
-moviepy==1.0.3
+moviepy
 imageio
 imageio-ffmpeg
 numpy
-instagrapi
-openai
+moviepy==1.0.3
 threadspy
+openai
