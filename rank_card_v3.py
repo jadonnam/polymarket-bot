@@ -8,15 +8,15 @@ from PIL import Image, ImageDraw, ImageFont
 
 WIDTH = 1080
 HEIGHT = 1350
-BG_COLOR = (8, 10, 18)
-TEXT_COLOR = (242, 244, 247)
-SUB_TEXT_COLOR = (132, 138, 150)
-BAR_BG = (44, 50, 66)
-POS_COLOR = (79, 209, 125)
+BG_COLOR = (0, 0, 0)
+TEXT_COLOR = (244, 246, 248)
+SUB_TEXT_COLOR = (152, 158, 170)
+BAR_BG = (42, 48, 62)
+POS_COLOR = (78, 205, 122)
 NEG_COLOR = (255, 107, 107)
 FLAT_COLOR = (145, 152, 165)
 
-ACCENT_NEWS = (214, 221, 232)
+ACCENT_NEWS = (229, 233, 242)
 ACCENT_POLY = (247, 175, 74)
 ACCENT_MARKET = (88, 202, 182)
 
@@ -120,6 +120,7 @@ def draw_card(page_type: str, items: List[Dict], out_path: str, generated_at_tex
     delta_font = get_font(24, bold=True)
     meta_font = get_font(24, bold=False)
     foot_font = get_font(18, bold=False)
+    importance_font = get_font(18, bold=False)
 
     draw.text((60, 52), "JADONNAM", fill=SUB_TEXT_COLOR, font=brand_font)
 
@@ -174,12 +175,16 @@ def draw_card(page_type: str, items: List[Dict], out_path: str, generated_at_tex
         score_text = f"{item['score']}%"
         score_w = _text_width(draw, score_text, score_font)
         score_x = WIDTH - 60 - score_w
-        draw.text((score_x, y + 4), score_text, fill=accent, font=score_font)
+        draw.text((score_x, y + 10), score_text, fill=accent, font=score_font)
+
+        imp_text = "중요도"
+        imp_w = _text_width(draw, imp_text, importance_font)
+        draw.text((score_x + score_w - imp_w, y - 18), imp_text, fill=SUB_TEXT_COLOR, font=importance_font)
 
         delta_text, delta_color = _delta_display(item.get("delta"))
         if delta_text:
             delta_w = _text_width(draw, delta_text, delta_font)
-            draw.text((score_x - delta_w - 14, y + 12), delta_text, fill=delta_color, font=delta_font)
+            draw.text((score_x - delta_w - 14, y + 18), delta_text, fill=delta_color, font=delta_font)
 
         _draw_bar(draw, bar_x, y + 78, bar_w, bar_h, item["score"], accent)
 

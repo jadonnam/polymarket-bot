@@ -31,25 +31,21 @@ def build_content_pack(news_items: List[Dict], poly_items: List[Dict], market_it
 
     feed_caption = (
         f"{hook}\n\n"
-        f"뉴스 쪽에서는 '{top_news['label']}' 이슈가 제일 강하게 잡혔고, "
-        f"폴리마켓에서는 '{top_poly['label']}' 쪽에 베팅이 몰렸습니다. "
-        f"실제 가격 반응 1위는 '{top_market['label']}'였습니다.\n\n"
-        f"오늘 한 번에 보면 되는 포인트\n"
-        f"- 뉴스 1위: {top_news['label']}\n"
-        f"- 폴리마켓 1위: {top_poly['label']}\n"
-        f"- 시장 반응 1위: {top_market['label']}\n\n"
-        "뉴스, 베팅, 가격 반응 순서대로 보면 지금 돈이 어디에 먼저 반응했는지 바로 보입니다.\n"
-        "저장해두면 다음 흐름이 바뀌었을 때 비교하기 편합니다."
+        f"오늘 흐름 핵심만 압축했습니다.\n"
+        f"뉴스 1위는 '{top_news['label']}', "
+        f"폴리마켓 1위는 '{top_poly['label']}', "
+        f"시장 반응 1위는 '{top_market['label']}'입니다.\n\n"
+        f"중요도 게이지만 보면 어디에 돈이 먼저 반응했는지 바로 보입니다.\n"
+        f"저장해두고 다음 업로드와 비교해보세요."
     )
 
     reel_caption = (
         f"{hook}\n\n"
-        f"오늘 핵심만 빠르게 정리\n"
         f"뉴스 1위: {top_news['label']}\n"
         f"폴리마켓 1위: {top_poly['label']}\n"
         f"시장 반응 1위: {top_market['label']}\n\n"
-        "헤드라인만 보면 놓치기 쉬운 돈 흐름까지 같이 묶었습니다.\n"
-        "저장해두고 다음 업로드랑 비교해보세요.\n\n"
+        "헤드라인, 베팅, 가격 반응을 한 번에 묶었습니다.\n"
+        "저장해두면 다음 흐름 비교할 때 더 잘 보입니다.\n\n"
         "#경제 #경제뉴스 #시장분석 #돈흐름 #폴리마켓 #유가 #환율 #비트코인 #금리 #재테크"
     )
 
@@ -58,7 +54,7 @@ def build_content_pack(news_items: List[Dict], poly_items: List[Dict], market_it
         "cover_candidates": "\n".join([
             f"1) {hook}",
             "2) 헤드라인보다 먼저 움직인 돈 흐름",
-            "3) 오늘 시장 핵심 30초 정리",
+            "3) 오늘 시장 핵심 15초 정리",
         ]),
         "reel_hook": hook,
         "feed_caption": feed_caption,
