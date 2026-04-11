@@ -405,10 +405,8 @@ def post_regular_rank_cards() -> None:
         f"[CTA]\n{pack['cta']}"
     )
 
-    # 아침 슬롯에만 인스타 릴스 자동업로드
-    slot = current_regular_slot()
-    is_morning = (slot == "morning") or FORCE_REGULAR_NOW
-    if is_morning and upload_reel is not None:
+    # 아침/저녁 둘 다 인스타 릴스 자동업로드
+    if upload_reel is not None:
         try:
             upload_reel(reel_path, pack["reel_hook"])
             print("[인스타 릴스 자동업로드 완료]")
