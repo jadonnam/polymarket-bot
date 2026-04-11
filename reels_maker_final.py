@@ -40,16 +40,47 @@ def _text_image(text: str, subtitle: str, out_path: str) -> None:
     img.save(out_path, quality=95)
 
 
+def _set_duration(clip, duration: float):
+    if hasattr(clip, "with_duration"):
+        return clip.with_duration(duration)
+    return clip.set_duration(duration)
+
+
+def _resize(clip, *, width=None, height=None):
+    if hasattr(clip, "resized"):
+        return clip.resized(width=width, height=height)
+    return clip.resize(width=width, height=height)
+
+
+def _crop_center(clip, width: int, height: int):
+    x_center = clip.w / 2
+    y_center = clip.h / 2
+    if hasattr(clip, "cropped"):
+        return clip.cropped(x_center=x_center, y_center=y_center, width=width, height=height)
+    x1 = max(0, int(x_center - width / 2))
+    y1 = max(0, int(y_center - height / 2))
+    x2 = min(int(clip.w), x1 + width)
+    y2 = min(int(clip.h), y1 + height)
+    return clip.crop(x1=x1, y1=y1, x2=x2, y2=y2)
+
+
 def _prep(path: str, duration: float):
-    clip = ImageClip(path).with_duration(duration)
-    clip = clip.resized(height=H)
+    clip = ImageClip(path)
+    clip = _set_duration(clip, duration)
+    clip = _resize(clip, height=H)
     if clip.w < W:
-        clip = clip.resized(width=W)
-    clip = clip.cropped(x_center=clip.w / 2, y_center=clip.h / 2, width=W, height=H)
+        clip = _resize(clip, width=W)
+    clip = _crop_center(clip, W, H)
     return clip
 
 
-def build_reel(news_path: str = "output_rank/rank_news.jpg", poly_path: str = "output_rank/rank_poly.jpg", market_path: str = "output_rank/rank_market.jpg", hook_text: str = "지금 시장이 먼저 반응한 이슈", out_path: str = "output_rank/reel_output.mp4") -> str:
+def build_reel(
+    news_path: str = "output_rank/rank_news.jpg",
+    poly_path: str = "output_rank/rank_poly.jpg",
+    market_path: str = "output_rank/rank_market.jpg",
+    hook_text: str = "지금 시장이 먼저 반응한 이슈",
+    out_path: str = "output_rank/reel_output.mp4",
+) -> str:
     Path("output_rank").mkdir(exist_ok=True)
     intro = "output_rank/_reel_intro.jpg"
     outro = "output_rank/_reel_outro.jpg"
