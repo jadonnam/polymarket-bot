@@ -1,6 +1,6 @@
+requests
+Pillow
 moviepy
 imageio
 imageio-ffmpeg
-Pillow
 numpy
-requests
