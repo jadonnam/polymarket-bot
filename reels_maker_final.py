@@ -43,7 +43,7 @@ def _set_audio(clip, audio):
     return clip.set_audio(audio)
 
 
-def _gradient_bg(top=(30, 64, 118), bottom=(8, 14, 24)):
+def _gradient_bg(top=(8, 10, 18), bottom=(18, 22, 36)):
     img = Image.new("RGB", (W, H), top)
     px = img.load()
     for y in range(H):
@@ -69,7 +69,7 @@ def _wrap(draw, text, font, max_width):
             lines.append(current)
             current = word
     lines.append(current)
-    return lines[:3]
+    return lines[:2]
 
 
 def _topic_keyword(text: str) -> str:
@@ -90,55 +90,49 @@ def _topic_keyword(text: str) -> str:
 
 
 def _topic_prompt_variants(hook_text: str):
+    """자돈남 채널 방향: 어둡고 긴장감 있는 프리미엄 금융 분위기"""
     key = _topic_keyword(hook_text)
+
     common = (
-        "Ultra-realistic editorial news photography, authentic human-shot photo, premium Reuters/Bloomberg magazine aesthetic, "
-        "bright natural daylight or soft bright overcast lighting, not CGI, not illustration, not poster, no text, no watermark, no UI, "
-        "vertical 9:16 composition, keep the top 45 percent visually simple and uncluttered for headline overlay, realistic depth and believable details."
+        "Dark cinematic editorial photography, moody dramatic lighting, deep shadows, "
+        "premium financial news atmosphere, no text, no watermark, no UI elements, "
+        "vertical 9:16 composition, photorealistic, high contrast, tension and urgency, "
+        "upper half clean and dark for text overlay."
     )
+
     if key == "oil":
         return [
-            f"Bright documentary-style photo of a large oil tanker moving through open water in daytime, clean sky, realistic reflections, premium macro-news energy image, upper area visually clean. {common}",
-            f"Photorealistic editorial image of global energy shipping in daylight, tanker deck and sea under bright sun, premium financial magazine look, believable human-shot composition. {common}",
+            f"Dramatic night shot of a massive oil tanker cutting through dark ocean waters, orange refinery fires glowing on the horizon, deep shadows, cinematic tension. {common}",
+            f"Dark aerial view of an oil refinery at night, industrial flames and smoke, dramatic orange and black palette, high stakes atmosphere. {common}",
         ]
     if key == "fx":
         return [
-            f"Bright editorial finance photo of a modern foreign exchange desk, soft daylight through windows, polished screens glow, realistic human-shot composition with clean upper area. {common}",
-            f"Photorealistic macro-finance image of currency trading atmosphere, bright blue and silver palette, premium newsroom look, open top area, not dark. {common}",
+            f"Dark moody trading room at night, multiple screens glowing with currency charts, deep blue and amber tones, tense atmosphere, cinematic. {common}",
+            f"Close-up of glowing financial screens in darkness showing dollar and won exchange rates, dramatic contrast, premium noir finance aesthetic. {common}",
         ]
     if key == "bitcoin":
         return [
-            f"Bright luxury trading desk photo with crypto-market mood, daylight reflections, premium editorial look, restrained bitcoin cue, stylish and realistic, upper area clean. {common}",
-            f"Photorealistic business-magazine image of a modern digital asset trading setup in daylight, clean glass reflections, believable and premium, not neon-heavy. {common}",
+            f"Dark dramatic scene of crypto trading screens glowing in a dim room, deep shadows, intense blue and white light, high tension atmosphere. {common}",
+            f"Moody night cityscape with dark trading terminal screens reflecting bitcoin chart movements, cinematic financial noir. {common}",
         ]
     if key == "rates":
         return [
-            f"Bright editorial photo of a central-bank or institutional finance setting, premium macro-news style, clean architecture, upper frame open for text. {common}",
-            f"Photorealistic daylight image of a policy-driven financial newsroom environment, elegant and realistic, important but not gloomy mood. {common}",
+            f"Dark dramatic exterior of a central bank building at night, imposing architecture under stormy sky, dramatic spotlights, tension and authority. {common}",
+            f"Moody government financial institution at dusk, heavy clouds, dramatic lighting, serious and weighty atmosphere. {common}",
         ]
     if key == "geopolitics":
         return [
-            f"Bright documentary-style image of strategic shipping waters in daytime, subtle geopolitical tension, premium world-news editorial photography, visually clean upper area. {common}",
-            f"Photorealistic world-news background with cargo route and distant patrol presence under bright sky, realistic and restrained, premium business-news look. {common}",
+            f"Dark aerial view of strategic shipping strait at night, distant orange glow of conflict on horizon, tense military atmosphere, cinematic. {common}",
+            f"Dramatic dark ocean scene at night with cargo ships and distant warning lights, geopolitical tension, deep shadows and orange accents. {common}",
         ]
     if key == "gold":
         return [
-            f"Bright premium finance photo with safe-haven gold mood, elegant metallic reflections, clean editorial business-magazine aesthetic, open top area. {common}",
-            f"Photorealistic macro-market image evoking gold demand, bright high-end desk reflections, realistic and luxurious without looking fake. {common}",
+            f"Dark vault interior with gold bars under dramatic single spotlight, deep shadows, luxury and tension combined, cinematic noir. {common}",
+            f"Dramatic close-up of gold bars in darkness, single dramatic light source, rich and heavy atmosphere, financial safe haven mood. {common}",
         ]
     return [
-        f"Bright premium financial-news background, realistic editorial photography, modern market atmosphere, daylight clean composition, upper area simple for headline overlay. {common}",
-        f"Photorealistic business-magazine image of global market mood, bright polished finance aesthetic, believable human-shot composition, no clutter at the top. {common}",
-    ]
-
-
-def _face_prompt_variants():
-    common = (
-        "Ultra-realistic editorial portrait photography, believable human skin, premium magazine look, no text, no watermark, vertical 9:16, bright daylight in luxury car interior."
-    )
-    return [
-        f"Confident stylish young man in a premium sports car during daytime, subtle reaction expression, luxury lifestyle editorial photo, bright and realistic. {common}",
-        f"Photorealistic editorial portrait of a successful young man reacting to market news while seated in a luxury car, bright daylight, premium and clean composition. {common}",
+        f"Dark premium financial trading floor at night, screens glowing with market data, deep shadows and dramatic blue light, cinematic tension. {common}",
+        f"Moody dark cityscape at night from above, financial district lights, dramatic contrast, sense of global market forces at work. {common}",
     ]
 
 
@@ -153,239 +147,172 @@ def _cover_crop(img: Image.Image, target_w: int = W, target_h: int = H) -> Image
     return img.crop((left, top, left + target_w, top + target_h))
 
 
-def _analyze_brightness(img: Image.Image) -> float:
-    gray = ImageOps.grayscale(img).resize((64, 64), Image.LANCZOS)
-    arr = np.asarray(gray, dtype=np.float32)
-    return float(arr.mean())
-
-
-def _brighten_image(img: Image.Image) -> Image.Image:
-    b = _analyze_brightness(img)
-    if b < 70:
-        img = ImageEnhance.Brightness(img).enhance(2.0)
-        img = ImageEnhance.Contrast(img).enhance(1.10)
-        img = ImageEnhance.Color(img).enhance(1.06)
-    elif b < 95:
-        img = ImageEnhance.Brightness(img).enhance(1.55)
-        img = ImageEnhance.Contrast(img).enhance(1.05)
-    elif b < 120:
-        img = ImageEnhance.Brightness(img).enhance(1.22)
-    return img
-
-
-def _tone_finish(img: Image.Image, top_clear: bool = False) -> Image.Image:
-    img = _brighten_image(img)
-    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
-    od = ImageDraw.Draw(overlay)
-    if top_clear:
-        od.rectangle((0, 0, W, 820), fill=(10, 14, 22, 34))
-        od.rectangle((0, 1280, W, H), fill=(0, 0, 0, 22))
-        od.ellipse((-80, -120, 520, 440), fill=(255, 255, 255, 16))
-    else:
-        od.rectangle((0, 0, W, H), fill=(0, 0, 0, 12))
-    out = Image.alpha_composite(img.convert("RGBA"), overlay)
-    return out.convert("RGB")
-
-
-def _generate_openai_bg(prompt_variants, out_path: str, model_env: str) -> bool:
+def _generate_openai_bg(prompt_variants, out_path: str) -> bool:
     api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
     if not api_key:
         return False
     try:
         from openai import OpenAI
-    except Exception:
-        return False
-
-    # dall-e-3만 사용 (gpt-image-1은 권한 필요)
-    model = os.getenv(model_env, "dall-e-3")
-    size = "1024x1792"
-
-    try:
         client = OpenAI(api_key=api_key)
     except Exception as e:
         print(f"[이미지 클라이언트 실패] {repr(e)}")
         return False
 
+    # gpt-image-1 먼저 시도, 실패하면 dall-e-3
+    models = [
+        ("gpt-image-1", "1024x1536"),
+        ("dall-e-3", "1024x1792"),
+    ]
+
     for prompt in prompt_variants:
-        try:
-            result = client.images.generate(
-                model=model,
-                prompt=prompt,
-                size=size,
-                quality="standard",
-            )
-            data = result.data[0]
-            if getattr(data, "b64_json", None):
-                raw = base64.b64decode(data.b64_json)
-            elif getattr(data, "url", None):
-                raw = requests.get(data.url, timeout=60).content
-            else:
+        for model, size in models:
+            try:
+                result = client.images.generate(
+                    model=model,
+                    prompt=prompt,
+                    size=size,
+                )
+                data = result.data[0]
+                if getattr(data, "b64_json", None):
+                    raw = base64.b64decode(data.b64_json)
+                elif getattr(data, "url", None):
+                    raw = requests.get(data.url, timeout=60).content
+                else:
+                    continue
+                img = Image.open(BytesIO(raw)).convert("RGB")
+                img = _cover_crop(img)
+                img.save(out_path, quality=95)
+                print(f"[이미지 생성 성공] model={model}")
+                return True
+            except Exception as e:
+                print(f"[이미지 재시도] model={model} err={repr(e)}")
                 continue
-            img = Image.open(BytesIO(raw)).convert("RGB")
-            img = _cover_crop(img)
-            img = _tone_finish(img, top_clear=True)
-            img.save(out_path, quality=95)
-            print(f"[이미지 생성 성공] model={model}")
-            return True
-        except Exception as e:
-            print(f"[이미지 재시도] err={repr(e)}")
-            continue
     return False
 
 
 def _draw_topic_fallback(hook_text: str, out_path: str) -> None:
+    """DALL-E 실패시 다크 그라디언트 폴백"""
     key = _topic_keyword(hook_text)
     palettes = {
-        "oil": ((126, 188, 255), (255, 214, 122)),
-        "fx": ((122, 188, 255), (232, 240, 255)),
-        "bitcoin": ((255, 205, 120), (122, 188, 255)),
-        "rates": ((174, 208, 255), (94, 220, 194)),
-        "geopolitics": ((144, 190, 255), (255, 194, 118)),
-        "gold": ((226, 194, 118), (255, 230, 170)),
-        "market": ((122, 188, 255), (94, 220, 194)),
+        "oil": ((80, 40, 10), (255, 120, 30)),
+        "fx": ((10, 20, 60), (30, 80, 180)),
+        "bitcoin": ((10, 10, 40), (60, 60, 200)),
+        "rates": ((10, 30, 50), (20, 80, 120)),
+        "geopolitics": ((40, 10, 10), (180, 60, 20)),
+        "gold": ((40, 30, 5), (180, 140, 20)),
+        "market": ((10, 15, 30), (20, 50, 100)),
     }
     c1, c2 = palettes.get(key, palettes["market"])
-    img = _gradient_bg((70, 128, 198), (10, 18, 30)).convert("RGBA")
+    img = _gradient_bg((8, 10, 18), (20, 25, 40)).convert("RGBA")
     glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     gd = ImageDraw.Draw(glow)
-    gd.ellipse((-160, -240, 720, 520), fill=(*c1, 88))
-    gd.ellipse((500, 120, 1320, 980), fill=(*c2, 72))
-    gd.rectangle((0, 0, W, 760), fill=(255, 255, 255, 12))
+    gd.ellipse((-160, 600, 720, 1400), fill=(*c2, 60))
+    gd.ellipse((400, 800, 1300, 1800), fill=(*c1, 40))
     img = Image.alpha_composite(img, glow)
-    img = _tone_finish(img.convert("RGB"), top_clear=True)
-    img.save(out_path, quality=95)
-
-
-def _draw_face_fallback(out_path: str) -> None:
-    img = _gradient_bg((118, 170, 230), (18, 24, 36)).convert("RGBA")
-    d = ImageDraw.Draw(img)
-    d.ellipse((120, 150, 980, 1020), fill=(235, 198, 170, 230))
-    d.rounded_rectangle((245, 980, 850, 1820), radius=80, fill=(36, 40, 60, 250))
-    d.ellipse((200, 180, 900, 760), fill=(72, 56, 44, 230))
-    d.rectangle((0, 0, W, 420), fill=(255, 255, 255, 24))
-    img = _tone_finish(img.convert("RGB"), top_clear=True)
-    img.save(out_path, quality=95)
-
-
-def _generate_openai_intro_bg(hook_text: str, out_path: str) -> bool:
-    return _generate_openai_bg(_topic_prompt_variants(hook_text), out_path, "INTRO_IMAGE_MODEL")
-
-
-def _generate_openai_face_bg(out_path: str) -> bool:
-    return _generate_openai_bg(_face_prompt_variants(), out_path, "OUTRO_IMAGE_MODEL")
-
-
-def _text_shadow(draw, xy, text, font, fill, shadow=(0, 0, 0), shadow_alpha=180, offsets=None):
-    if offsets is None:
-        offsets = [(-3, -3), (3, -3), (-3, 3), (3, 3), (0, 4), (0, 6)]
-    sx, sy = xy
-    for ox, oy in offsets:
-        draw.text((sx + ox, sy + oy), text, fill=(*shadow, shadow_alpha), font=font)
-    draw.text(xy, text, fill=fill, font=font)
-
-
-def _draw_text_panel(img: Image.Image, top: int, bottom: int) -> Image.Image:
-    panel = Image.new("RGBA", img.size, (0, 0, 0, 0))
-    pd = ImageDraw.Draw(panel)
-    pd.rounded_rectangle((70, top, W - 70, bottom), radius=48, fill=(6, 10, 18, 112))
-    panel = panel.filter(ImageFilter.GaussianBlur(12))
-    return Image.alpha_composite(img.convert("RGBA"), panel)
+    img.convert("RGB").save(out_path, quality=95)
 
 
 def _intro_image(text: str, subtitle: str, out_path: str, bg_path: Optional[str] = None):
+    """인트로: 배경 이미지 + 텍스트만. 패널/줄 없음."""
     if bg_path and os.path.exists(bg_path):
         img = Image.open(bg_path).convert("RGB").resize((W, H), Image.LANCZOS)
     else:
         img = _gradient_bg()
-    img = _tone_finish(img, top_clear=True)
-    img = _draw_text_panel(img, 430, 980).convert("RGB")
-    draw = ImageDraw.Draw(img)
 
+    # 상단 약간 어둡게만
+    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    od = ImageDraw.Draw(overlay)
+    od.rectangle((0, 0, W, H // 2), fill=(0, 0, 0, 80))
+    img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
+
+    draw = ImageDraw.Draw(img)
     title_font = _font(96, True)
     sub_font = _font(36, False)
-    brand_font = _font(26, True)
+    brand_font = _font(24, False)
 
-    draw.text((62, 52), "JADONNAM", fill=(236, 240, 246), font=brand_font)
+    # 브랜드
+    draw.text((60, 60), "JADONNAM", fill=(180, 185, 195), font=brand_font)
 
-    # 후킹 멘트 짧게 — 최대 2줄
-    lines = _wrap(draw, text, title_font, 820)[:2]
-    y = 520
+    # 메인 텍스트 (그림자만)
+    lines = _wrap(draw, text, title_font, 900)
+    y = 480
     for line in lines:
         w = draw.textbbox((0, 0), line, font=title_font)[2]
-        _text_shadow(draw, ((W - w) // 2, y), line, title_font, (250, 252, 255), shadow_alpha=210)
-        y += 110
+        x = (W - w) // 2
+        # 그림자
+        for ox, oy in [(-3, 3), (3, 3), (0, 5)]:
+            draw.text((x + ox, y + oy), line, fill=(0, 0, 0, 180), font=title_font)
+        draw.text((x, y), line, fill=(244, 246, 248), font=title_font)
+        y += 112
 
+    # 서브텍스트
     sw = draw.textbbox((0, 0), subtitle, font=sub_font)[2]
-    _text_shadow(draw, ((W - sw) // 2, y + 10), subtitle, sub_font, (235, 239, 245), shadow_alpha=180)
-    draw.rounded_rectangle((420, y + 74, 660, y + 82), radius=4, fill=(247, 175, 74))
+    draw.text(((W - sw) // 2, y + 16), subtitle, fill=(160, 165, 175), font=sub_font)
+
     img.save(out_path, quality=95)
 
 
 def _outro_image(text: str, subtitle: str, out_path: str, bg_path: Optional[str] = None):
+    """아웃트로: 인트로랑 동일 배경 재사용"""
     if bg_path and os.path.exists(bg_path):
         img = Image.open(bg_path).convert("RGB").resize((W, H), Image.LANCZOS)
     else:
-        img = _gradient_bg((92, 146, 216), (18, 24, 36))
-    img = _tone_finish(img, top_clear=True)
-    img = _draw_text_panel(img, 1040, 1600).convert("RGB")
+        img = _gradient_bg()
+
+    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    od = ImageDraw.Draw(overlay)
+    od.rectangle((0, H // 2, W, H), fill=(0, 0, 0, 100))
+    img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
+
     draw = ImageDraw.Draw(img)
+    title_font = _font(80, True)
+    sub_font = _font(32, False)
+    brand_font = _font(24, False)
 
-    title_font = _font(86, True)
-    sub_font = _font(34, False)
+    draw.text((60, 60), "JADONNAM", fill=(180, 185, 195), font=brand_font)
 
-    lines = _wrap(draw, text, title_font, 860)
-    y = 1120
+    lines = _wrap(draw, text, title_font, 900)
+    y = 1200
     for line in lines:
         w = draw.textbbox((0, 0), line, font=title_font)[2]
-        _text_shadow(draw, ((W - w) // 2, y), line, title_font, (248, 249, 251), shadow_alpha=190)
-        y += 100
+        x = (W - w) // 2
+        for ox, oy in [(-2, 3), (2, 3), (0, 4)]:
+            draw.text((x + ox, y + oy), line, fill=(0, 0, 0, 160), font=title_font)
+        draw.text((x, y), line, fill=(244, 246, 248), font=title_font)
+        y += 96
 
     sw = draw.textbbox((0, 0), subtitle, font=sub_font)[2]
-    _text_shadow(draw, ((W - sw) // 2, y + 20), subtitle, sub_font, (232, 236, 242), shadow_alpha=170)
-    draw.rounded_rectangle((430, y + 80, 650, y + 88), radius=4, fill=(88, 202, 182))
+    draw.text(((W - sw) // 2, y + 20), subtitle, fill=(160, 165, 175), font=sub_font)
+
     img.save(out_path, quality=95)
 
 
-def _fit_card_no_zoom(src_path: str, out_path: str, section_label: str) -> str:
-    """줌인 없이 카드를 letterbox로 배치 — 잘림 없음"""
+def _fit_card_no_zoom(src_path: str, out_path: str) -> str:
+    """카드를 검은 배경에 letterbox로 배치. 상단 라벨 없음."""
     card = Image.open(src_path).convert("RGB")
     canvas = Image.new("RGB", (W, H), (0, 0, 0))
 
-    # 상단 라벨
-    cd = ImageDraw.Draw(canvas)
-    label_font = _font(32, True)
-    sub_font = _font(22, False)
-    label_w = cd.textbbox((0, 0), section_label, font=label_font)[2]
-    cd.text(((W - label_w) // 2, 100), section_label, fill=(245, 246, 248), font=label_font)
-    sub = "핵심 흐름"
-    sub_w = cd.textbbox((0, 0), sub, font=sub_font)[2]
-    cd.text(((W - sub_w) // 2, 148), sub, fill=(152, 158, 170), font=sub_font)
-    cd.rounded_rectangle((460, 188, 620, 196), radius=4, fill=(245, 246, 248))
-
-    # 카드를 비율 유지하면서 최대한 크게 (잘림 없이)
-    max_w, max_h = 1020, 1600
+    # 비율 유지하면서 최대한 크게
+    max_w, max_h = 1080, 1700
     ratio = min(max_w / card.width, max_h / card.height)
     new_w = int(card.width * ratio)
     new_h = int(card.height * ratio)
     card = card.resize((new_w, new_h), Image.LANCZOS)
 
     # 그림자
-    shadow = Image.new("RGBA", (new_w + 60, new_h + 60), (0, 0, 0, 0))
+    shadow = Image.new("RGBA", (new_w + 40, new_h + 40), (0, 0, 0, 0))
     sdraw = ImageDraw.Draw(shadow)
-    sdraw.rounded_rectangle((24, 24, new_w + 36, new_h + 36), radius=42, fill=(0, 0, 0, 190))
-    shadow = shadow.filter(ImageFilter.GaussianBlur(28))
+    sdraw.rounded_rectangle((16, 16, new_w + 24, new_h + 24), radius=30, fill=(0, 0, 0, 160))
+    shadow = shadow.filter(ImageFilter.GaussianBlur(20))
 
     card_x = (W - new_w) // 2
-    card_y = 260
+    card_y = (H - new_h) // 2
 
-    canvas.paste(shadow, (card_x - 30, card_y - 30), shadow)
+    canvas.paste(shadow, (card_x - 20, card_y - 20), shadow)
 
-    # 라운드 마스크
-    rounded = Image.new("RGBA", card.size, (0, 0, 0, 0))
     mask = Image.new("L", card.size, 0)
-    ImageDraw.Draw(mask).rounded_rectangle((0, 0, new_w, new_h), radius=34, fill=255)
-    rounded.paste(card, (0, 0))
-    canvas.paste(rounded, (card_x, card_y), mask)
+    ImageDraw.Draw(mask).rounded_rectangle((0, 0, new_w, new_h), radius=24, fill=255)
+    canvas.paste(card, (card_x, card_y), mask)
     canvas.save(out_path, quality=95)
     return out_path
 
@@ -416,20 +343,17 @@ def _build_audio(duration: float):
             clip = AudioFileClip(ASSETS_AUDIO)
             if clip.duration > duration:
                 return clip.subclip(0, duration)
+            loops = []
+            remaining = duration
+            while remaining > 0:
+                seg = clip.subclip(0, min(clip.duration, remaining))
+                loops.append(seg)
+                remaining -= seg.duration
             try:
-                loops = []
-                remaining = duration
-                while remaining > 0:
-                    seg = clip.subclip(0, min(clip.duration, remaining))
-                    loops.append(seg)
-                    remaining -= seg.duration
-                try:
-                    from moviepy.editor import concatenate_audioclips
-                except Exception:
-                    from moviepy import concatenate_audioclips
-                return concatenate_audioclips(loops)
+                from moviepy.editor import concatenate_audioclips
             except Exception:
-                return clip
+                from moviepy import concatenate_audioclips
+            return concatenate_audioclips(loops)
         except Exception as e:
             print(f"[외부 배경음 로드 실패] {repr(e)}")
     return _build_synth_audio(duration)
@@ -445,32 +369,25 @@ def build_reel(
     Path("output_rank").mkdir(exist_ok=True)
 
     intro_bg = "output_rank/_reel_intro_bg.jpg"
-    outro_bg = "output_rank/_reel_outro_bg.jpg"
     intro = "output_rank/_reel_intro.jpg"
     news_frame = "output_rank/_reel_news_frame.jpg"
     poly_frame = "output_rank/_reel_poly_frame.jpg"
     market_frame = "output_rank/_reel_market_frame.jpg"
     outro = "output_rank/_reel_outro.jpg"
 
-    # 인트로 배경 DALL-E 생성 (아웃트로도 같은 이미지 재사용)
-    if not _generate_openai_intro_bg(hook_text, intro_bg):
+    # 배경 이미지 생성 (인트로/아웃트로 공용)
+    if not _generate_openai_bg(_topic_prompt_variants(hook_text), intro_bg):
         _draw_topic_fallback(hook_text, intro_bg)
 
-    # 아웃트로는 인트로 이미지 재사용 (DALL-E 추가 호출 없음)
-    outro_bg = intro_bg
+    # 인트로/아웃트로 텍스트 합성
+    _intro_image(hook_text, "오늘 돈 흐름 정리", intro, bg_path=intro_bg)
+    _outro_image("저장해두면 나중에 비교하기 좋아", "팔로우하면 매일 업데이트", outro, bg_path=intro_bg)
 
-    # 후킹 멘트 짧게 가공 (최대 6글자씩 2줄)
-    short_hook = hook_text
-    _intro_image(short_hook, "오늘 돈 흐름 정리", intro, bg_path=intro_bg)
+    # 카드 — 줌인 없이, 라벨 없이
+    _fit_card_no_zoom(news_path, news_frame)
+    _fit_card_no_zoom(poly_path, poly_frame)
+    _fit_card_no_zoom(market_path, market_frame)
 
-    # 카드 — 줌인 없이
-    _fit_card_no_zoom(news_path, news_frame, "뉴스")
-    _fit_card_no_zoom(poly_path, poly_frame, "폴리마켓")
-    _fit_card_no_zoom(market_path, market_frame, "시장 반응")
-
-    _outro_image("저장해두면 다음에 비교하기 좋아", "팔로우하면 매일 업데이트", outro, bg_path=outro_bg)
-
-    # 클립 구성 — 줌인 없음
     clips = [
         _prep(intro, 2.5),
         _prep(news_frame, 3.0),
