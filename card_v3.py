@@ -1,82 +1,64 @@
-
 import os
+from datetime import datetime, timedelta, timezone
 from PIL import Image, ImageDraw, ImageFont
 
-from prompt_bank_v3 import detect_visual_topic, breaking_prompt, breaking_headline
+W, H = 1080, 1350
+BG = (8, 10, 18)
+TEXT = (244, 246, 248)
+SUB = (145, 152, 165)
+ACCENT = (255, 174, 60)
+FONT_DIR = "fonts"
 
-def _font(size, bold=True):
-    paths = [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-    ]
-    for path in paths:
-        if os.path.exists(path):
-            return ImageFont.truetype(path, size)
-    return ImageFont.load_default()
 
-def _wrap(text, limit=12):
-    t = str(text).strip()
-    if len(t) <= limit:
-        return [t]
-    parts = t.split()
-    if len(parts) <= 1:
-        return [t[:limit], t[limit:limit*2]]
-    line1, line2 = "", ""
-    for p in parts:
-        if len((line1 + " " + p).strip()) <= limit and not line2:
-            line1 = (line1 + " " + p).strip()
-        else:
-            line2 = (line2 + " " + p).strip()
-    return [line1, line2[:limit]]
-
-def _fallback_bg(path):
-    from PIL import Image
-    img = Image.new("RGB", (1080, 1350), (12, 12, 18))
-    img.save(path, quality=95)
-    return path
-
-def create_breaking_image(raw_title, out_path="output_breaking.png"):
-    topic = detect_visual_topic(raw_title)
-    headline = breaking_headline(raw_title)
-    prompt = breaking_prompt(raw_title)
-
-    bg_path = "breaking_bg.jpg"
+def _font(name: str, size: int):
+    path = os.path.join(FONT_DIR, name)
     try:
-        from image_generator_new import safe_generate_bg
-        safe_generate_bg(
-            visual_topic=topic,
-            seed_text=headline,
-            context_title=headline,
-            context_desc=prompt,
-            output_path=bg_path,
-            title=headline,
-            desc=prompt,
-        )
+        return ImageFont.truetype(path, size)
     except Exception:
-        _fallback_bg(bg_path)
+        return ImageFont.load_default()
 
-    img = Image.open(bg_path).convert("RGBA").resize((1080, 1350))
-    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
-    d = ImageDraw.Draw(overlay)
 
-    # dark top fade for headline readability
-    d.rectangle((0, 0, 1080, 430), fill=(0, 0, 0, 120))
-    d.rounded_rectangle((60, 60, 208, 124), radius=18, fill=(255, 59, 59, 230))
+def _wrap(draw, text, font, width):
+    words = str(text).split()
+    if not words:
+        return [""]
+    lines = []
+    cur = words[0]
+    for w in words[1:]:
+        test = cur + " " + w
+        if draw.textbbox((0, 0), test, font=font)[2] <= width:
+            cur = test
+        else:
+            lines.append(cur)
+            cur = w
+    lines.append(cur)
+    return lines[:4]
 
-    chip_font = _font(34, True)
-    title_font = _font(88, True)
-    water_font = _font(24, False)
 
-    d.text((89, 73), "속보", font=chip_font, fill=(255, 255, 255, 255))
+def _kst_text():
+    now = datetime.now(timezone.utc) + timedelta(hours=9)
+    return now.strftime("%Y.%m.%d %H:%M KST")
 
-    lines = _wrap(headline, 14)
-    y = 168
-    for line in lines[:2]:
-        d.text((64 + 4, y + 4), line, font=title_font, fill=(0, 0, 0, 180))
-        d.text((64, y), line, font=title_font, fill=(255, 255, 255, 255))
-        y += 104
 
-    d.text((912, 1298), "jadonnam", font=water_font, fill=(180, 180, 188, 120))
+def create_breaking_image(title: str, out_path: str = "output_breaking.png") -> str:
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+    img = Image.new("RGB", (W, H), BG)
+    draw = ImageDraw.Draw(img)
 
-    out = Image.alpha_composite(img, overlay).convert("RGB")
-    out.save(out_path, quality=95)
+    brand = _font("Pretendard-Regular.ttf", 22)
+    big = _font("Pretendard-Bold.ttf", 98)
+    body = _font("Pretendard-Bold.ttf", 74)
+    small = _font("Pretendard-Regular.ttf", 28)
+
+    draw.text((60, 58), "JADONNAM", fill=SUB, font=brand)
+    draw.text((60, 180), "속보", fill=ACCENT, font=big)
+
+    lines = _wrap(draw, title, body, 930)
+    y = 420
+    for line in lines:
+        draw.text((60, y), line, fill=TEXT, font=body)
+        y += 98
+
+    draw.text((60, H - 92), f"기준 {_kst_text()}", fill=SUB, font=small)
+    img.save(out_path, quality=95)
     return out_path

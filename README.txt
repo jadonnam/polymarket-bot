@@ -1,6 +1,6 @@
-news.py와 main_master_v3.py를 덮어쓰기하면 됩니다.
-- 뉴스 속보 필터 강화
-- trusted source + breaking keyword 조합 필수
-- 뉴스 속보 점수 기준 상향
-- 10분마다 체크 구조 유지
-- 스킵 로그 복원
+이 ZIP은 다시 확인 후 보낸 최종 수정본입니다.
+덮어쓸 파일: rank_card_v3.py, news.py, main_master_v3.py
+적용 후 push:
+git add rank_card_v3.py news.py main_master_v3.py
+git commit -m "final rechecked sync"
+git push origin main

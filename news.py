@@ -1,9 +1,11 @@
+from __future__ import annotations
 
-import os
 import json
+import os
 import re
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
+from typing import Any, Dict, List
 
 import requests
 
@@ -44,22 +46,22 @@ MARKET_KEYWORDS = [
     "oil", "wti", "crude", "brent", "gold", "fed", "inflation", "cpi",
     "yield", "rate cut", "nasdaq", "s&p", "dow", "ceasefire", "iran",
     "israel", "war", "attack", "hormuz", "dollar", "fx", "won", "환율",
-    "유가", "금리", "물가", "비트", "달러", "금값"
+    "유가", "금리", "물가", "비트", "달러", "금값",
 ]
 HIGH_IMPACT_KEYWORDS = [
     "oil", "wti", "crude", "brent", "hormuz", "fed", "inflation", "cpi",
     "yield", "dollar", "fx", "won", "tariff", "bitcoin", "btc",
-    "iran", "israel", "war", "attack", "ceasefire", "gold"
+    "iran", "israel", "war", "attack", "ceasefire", "gold",
 ]
 BREAKING_KEYWORDS = [
     "breaking", "urgent", "developing", "attack", "missile", "strike",
     "ceasefire", "tariff", "fed", "rate", "oil", "bitcoin", "surge",
     "slump", "crash", "default", "bankruptcy", "sanction", "hormuz",
-    "iran", "israel", "war"
+    "iran", "israel", "war",
 ]
 
 
-def _now_utc():
+def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
 
@@ -67,7 +69,7 @@ def clean_spaces(text: str) -> str:
     return re.sub(r"\s+", " ", str(text or "")).strip()
 
 
-def _json_load(path, default):
+def _json_load(path: str, default):
     if not os.path.exists(path):
         return default
     try:
@@ -77,13 +79,60 @@ def _json_load(path, default):
         return default
 
 
-def _json_save(path, data):
+def _json_save(path: str, data) -> None:
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
-def _empty_cache():
-    return {"saved_at": "", "articles": [], "best": None}
+def load_cache() -> Dict[str, Any]:
+    return _json_load(CACHE_FILE, {"saved_at": "", "articles": [], "best": None})
+
+
+def save_cache(articles: List[Dict[str, Any]]) -> None:
+    best = None
+    if articles:
+        first = articles[0]
+        best = {
+            "title": first.get("title", ""),
+            "description": first.get("description", "") or first.get("content", "") or "",
+            "source": article_source_name(first),
+            "url": first.get("url", ""),
+            "publishedAt": first.get("publishedAt", ""),
+        }
+    _json_save(CACHE_FILE, {"saved_at": _now_utc().isoformat(), "articles": articles, "best": best})
+
+
+def get_cached_articles(max_age_hours: int = 6) -> List[Dict[str, Any]]:
+    cache = load_cache()
+    raw = cache.get("saved_at")
+    if not raw:
+        return []
+    try:
+        dt = datetime.fromisoformat(raw)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        if _now_utc() - dt <= timedelta(hours=max_age_hours):
+            return cache.get("articles", []) or []
+    except Exception:
+        return []
+    return []
+
+
+def get_cached_candidate():
+    cache = load_cache()
+    raw = cache.get("saved_at")
+    best = cache.get("best")
+    if not raw or not best:
+        return None
+    try:
+        dt = datetime.fromisoformat(raw)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        if _now_utc() - dt <= timedelta(hours=6):
+            return best
+    except Exception:
+        return None
+    return None
 
 
 def normalize_domain(url: str) -> str:
@@ -94,17 +143,6 @@ def normalize_domain(url: str) -> str:
     if host.startswith("www."):
         host = host[4:]
     return host
-
-
-def article_domain(article) -> str:
-    return normalize_domain(article.get("url", ""))
-
-
-def article_source_name(article) -> str:
-    src = article.get("source", {})
-    if isinstance(src, dict):
-        return (src.get("name", "") or "").strip()
-    return str(src or "").strip()
 
 
 def domain_is_trusted(domain: str) -> bool:
@@ -120,20 +158,31 @@ def source_name_is_trusted(name: str) -> bool:
     return bool(low) and low in {x.lower() for x in TRUSTED_SOURCE_NAMES}
 
 
-def article_text(article) -> str:
+def article_domain(article: Dict[str, Any]) -> str:
+    return normalize_domain(article.get("url", ""))
+
+
+def article_source_name(article: Dict[str, Any]) -> str:
+    src = article.get("source", {})
+    if isinstance(src, dict):
+        return (src.get("name", "") or "").strip()
+    return str(src or "").strip()
+
+
+def article_text(article: Dict[str, Any]) -> str:
     title = clean_spaces(article.get("title", ""))
     desc = clean_spaces(article.get("description", "") or article.get("content", "") or "")
     return f"{title} {desc}".lower()
 
 
-def trusted_article(article) -> bool:
+def trusted_article(article: Dict[str, Any]) -> bool:
     domain = article_domain(article)
     if domain_is_blocked(domain):
         return False
     return domain_is_trusted(domain) or source_name_is_trusted(article_source_name(article))
 
 
-def published_recent_enough(article, hours=36) -> bool:
+def published_recent_enough(article: Dict[str, Any], hours: int = 36) -> bool:
     raw = article.get("publishedAt")
     if not raw:
         return True
@@ -150,23 +199,23 @@ def published_recent_enough(article, hours=36) -> bool:
         return True
 
 
-def dedup_key(article) -> str:
+def dedup_key(article: Dict[str, Any]) -> str:
     title = clean_spaces(article.get("title", "")).lower()
     title = re.sub(r"[^a-z0-9가-힣\s]", " ", title)
     return re.sub(r"\s+", " ", title).strip()[:120]
 
 
-def has_market_impact(article) -> bool:
+def has_market_impact(article: Dict[str, Any]) -> bool:
     text = article_text(article)
     return any(k in text for k in MARKET_KEYWORDS)
 
 
-def has_high_impact(article) -> bool:
+def has_high_impact(article: Dict[str, Any]) -> bool:
     text = article_text(article)
     return any(k in text for k in HIGH_IMPACT_KEYWORDS)
 
 
-def is_low_quality_text(article) -> bool:
+def is_low_quality_text(article: Dict[str, Any]) -> bool:
     title = clean_spaces(article.get("title", ""))
     desc = clean_spaces(article.get("description", "") or article.get("content", "") or "")
     text = f"{title} {desc}".lower()
@@ -177,7 +226,7 @@ def is_low_quality_text(article) -> bool:
     return False
 
 
-def is_breaking_candidate(article) -> bool:
+def is_breaking_candidate(article: Dict[str, Any]) -> bool:
     text = article_text(article)
     title = clean_spaces(article.get("title", "")).lower()
     hit = sum(1 for k in BREAKING_KEYWORDS if k in text)
@@ -187,12 +236,10 @@ def is_breaking_candidate(article) -> bool:
         return False
     if hit >= 2:
         return True
-    if any(x in title for x in ["ceasefire", "missile", "attack", "tariff", "fed", "rate", "oil", "bitcoin"]):
-        return True
-    return False
+    return any(x in title for x in ["ceasefire", "missile", "attack", "tariff", "fed", "rate", "oil", "bitcoin"])
 
 
-def score_article(article):
+def score_article(article: Dict[str, Any]) -> int:
     text = article_text(article)
     score = 0
     if domain_is_trusted(article_domain(article)):
@@ -212,7 +259,7 @@ def score_article(article):
     return score
 
 
-def score_breaking_article(article):
+def score_breaking_article(article: Dict[str, Any]) -> int:
     text = article_text(article)
     score = 0
     if domain_is_trusted(article_domain(article)):
@@ -232,67 +279,11 @@ def score_breaking_article(article):
     return score
 
 
-def load_cache():
-    return _json_load(CACHE_FILE, _empty_cache())
-
-
-def save_cache(articles):
-    best = None
-    if articles:
-        first = articles[0]
-        best = {
-            "title": first.get("title", ""),
-            "description": first.get("description", "") or first.get("content", "") or "",
-            "source": article_source_name(first),
-            "url": first.get("url", ""),
-            "publishedAt": first.get("publishedAt", ""),
-        }
-    _json_save(CACHE_FILE, {
-        "saved_at": _now_utc().isoformat(),
-        "articles": articles,
-        "best": best,
-    })
-
-
-def get_cached_articles(max_age_hours=6):
-    cache = load_cache()
-    raw = cache.get("saved_at")
-    if not raw:
-        return []
-    try:
-        dt = datetime.fromisoformat(raw)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        if _now_utc() - dt <= timedelta(hours=max_age_hours):
-            return cache.get("articles", []) or []
-    except Exception:
-        return []
-    return []
-
-
-def get_cached_candidate():
-    cache = load_cache()
-    best = cache.get("best")
-    raw = cache.get("saved_at")
-    if not best or not raw:
-        return None
-    try:
-        dt = datetime.fromisoformat(raw)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        if _now_utc() - dt <= timedelta(hours=6):
-            return best
-    except Exception:
-        return None
-    return None
-
-
-def fetch_news(limit=40, hours_back=36):
+def fetch_news(limit: int = 40, hours_back: int = 36) -> List[Dict[str, Any]]:
     cached = get_cached_articles(max_age_hours=6)
     if not API_KEY:
         return cached
 
-    url = "https://newsapi.org/v2/everything"
     params = {
         "q": SEARCH_QUERY,
         "language": "en",
@@ -301,17 +292,16 @@ def fetch_news(limit=40, hours_back=36):
         "from": (_now_utc() - timedelta(hours=hours_back)).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "apiKey": API_KEY,
     }
-
     try:
-        data = requests.get(url, params=params, timeout=20).json()
+        data = requests.get("https://newsapi.org/v2/everything", params=params, timeout=20).json()
     except Exception:
         return cached
-
     if data.get("status") != "ok":
         print("뉴스 API 응답 이상:", data)
         return cached
 
-    filtered, seen = [], set()
+    filtered: List[Dict[str, Any]] = []
+    seen = set()
     for article in data.get("articles", []) or []:
         if not trusted_article(article):
             continue
@@ -336,9 +326,10 @@ def fetch_news(limit=40, hours_back=36):
     return cached
 
 
-def fetch_breaking_news(limit=20, hours_back=12):
+def fetch_breaking_news(limit: int = 20, hours_back: int = 12) -> List[Dict[str, Any]]:
     articles = fetch_news(limit=max(limit, 20), hours_back=hours_back)
-    out, seen = [], set()
+    out = []
+    seen = set()
     for article in articles:
         if not is_breaking_candidate(article):
             continue
