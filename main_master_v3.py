@@ -1,3 +1,4 @@
+
 import json
 import os
 import re
@@ -31,8 +32,10 @@ BREAKING_POLY_MIN_SCORE = 92
 USE_INSTAGRAM_FOR_BREAKING = os.getenv("USE_INSTAGRAM_FOR_BREAKING", "false").lower() == "true"
 FORCE_REGULAR_NOW = os.getenv("FORCE_REGULAR_NOW", "false").lower() == "true"
 
+
 def now_kst():
     return datetime.now(timezone.utc) + timedelta(hours=9)
+
 
 def load_json_file(path, default):
     if not os.path.exists(path):
@@ -43,9 +46,11 @@ def load_json_file(path, default):
     except Exception:
         return default
 
+
 def save_json_file(path, data):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+
 
 def current_regular_slot():
     now = now_kst()
@@ -56,14 +61,18 @@ def current_regular_slot():
         return "evening"
     return None
 
+
 def should_run_regular_post():
     return FORCE_REGULAR_NOW or current_regular_slot() is not None
+
 
 def load_regular_state():
     return load_json_file(REGULAR_STATE_FILE, {"last_morning_date": "", "last_evening_date": "", "last_force_ts": ""})
 
+
 def save_regular_state(data):
     save_json_file(REGULAR_STATE_FILE, data)
+
 
 def already_sent_regular():
     if FORCE_REGULAR_NOW:
@@ -77,6 +86,7 @@ def already_sent_regular():
         return state.get("last_evening_date") == today
     return False
 
+
 def mark_regular_sent():
     state = load_regular_state()
     today = now_kst().strftime("%Y-%m-%d")
@@ -89,12 +99,15 @@ def mark_regular_sent():
         state["last_evening_date"] = today
     save_regular_state(state)
 
+
 def load_breaking_state():
     return load_json_file(BREAKING_STATE_FILE, {"items": []})
+
 
 def save_breaking_state(state):
     state["items"] = state.get("items", [])[-100:]
     save_json_file(BREAKING_STATE_FILE, state)
+
 
 def was_recent_breaking(key):
     state = load_breaking_state()
@@ -110,19 +123,23 @@ def was_recent_breaking(key):
             continue
     return False
 
+
 def mark_breaking_posted(key, title):
     state = load_breaking_state()
     state["items"].append({"key": key, "title": title, "ts": now_kst().isoformat(timespec="seconds")})
     save_breaking_state(state)
 
+
 def _contains(text, words):
     t = str(text).lower()
     return any(w in t for w in words)
+
 
 def _clean(text, limit=18):
     text = str(text).strip()
     text = re.sub(r"\s+", " ", text)
     return text[:limit].strip()
+
 
 def parse_datetime_safe(value):
     if not value:
@@ -138,6 +155,7 @@ def parse_datetime_safe(value):
     except Exception:
         return None
 
+
 def regular_window_bounds():
     now = now_kst()
     slot = current_regular_slot()
@@ -151,6 +169,7 @@ def regular_window_bounds():
         return start_kst.astimezone(timezone.utc), end_kst.astimezone(timezone.utc)
     return None, None
 
+
 def article_in_window(article):
     start_utc, end_utc = regular_window_bounds()
     if not start_utc or not end_utc:
@@ -160,38 +179,57 @@ def article_in_window(article):
         return True
     return start_utc <= dt <= end_utc
 
+
 def _news_label(title):
     t = str(title)
-    if _contains(t, ["strait of hormuz", "hormuz", "호르무즈"]): return "호르무즈 변수 확대"
-    if _contains(t, ["환율", "달러", "usd", "fx", "won"]): return "환율 변동성 확대"
-    if _contains(t, ["유가", "oil", "wti", "crude", "brent"]): return "유가 상방 압력"
-    if _contains(t, ["bitcoin", "btc", "비트"]): return "비트코인 강세 유지"
-    if _contains(t, ["ethereum", "eth", "이더"]): return "이더 강세 유지"
-    if _contains(t, ["금리", "fed", "cpi", "inflation", "yield"]): return "금리 완화 기대"
-    if _contains(t, ["trump", "트럼프", "tariff", "관세"]): return "트럼프 변수 확대"
-    if _contains(t, ["iran", "israel", "war", "attack", "전쟁", "이란", "이스라엘", "공습"]): return "지정학 리스크 확대"
-    if _contains(t, ["gold", "금값", "금"]): return "안전자산 선호"
+    if _contains(t, ["strait of hormuz", "hormuz", "호르무즈"]):
+        return "호르무즈 변수 확대"
+    if _contains(t, ["환율", "달러", "usd", "fx", "won"]):
+        return "환율 변동성 확대"
+    if _contains(t, ["유가", "oil", "wti", "crude", "brent"]):
+        return "유가 상방 압력"
+    if _contains(t, ["bitcoin", "btc", "비트"]):
+        return "비트코인 강세 유지"
+    if _contains(t, ["ethereum", "eth", "이더"]):
+        return "이더 강세 유지"
+    if _contains(t, ["금리", "fed", "cpi", "inflation", "yield"]):
+        return "금리 완화 기대"
+    if _contains(t, ["trump", "트럼프", "tariff", "관세"]):
+        return "트럼프 변수 확대"
+    if _contains(t, ["iran", "israel", "war", "attack", "전쟁", "이란", "이스라엘", "공습"]):
+        return "지정학 리스크 확대"
+    if _contains(t, ["gold", "금값", "금"]):
+        return "안전자산 선호"
     return _clean(t, 16)
+
 
 def _news_score(article):
     title = article.get("title", "") or ""
     desc = article.get("description", "") or ""
     text = f"{title} {desc}".lower()
     score = 25
-    if _contains(text, ["환율", "usd", "fx", "달러", "won"]): score += 24
-    if _contains(text, ["oil", "wti", "crude", "brent", "유가"]): score += 26
-    if _contains(text, ["war", "attack", "missile", "전쟁", "공습", "이란", "israel", "iran"]): score += 22
-    if _contains(text, ["fed", "cpi", "inflation", "yield", "금리", "물가"]): score += 22
-    if _contains(text, ["bitcoin", "btc", "eth", "ethereum", "비트", "코인"]): score += 18
-    if _contains(text, ["trump", "관세", "tariff"]): score += 16
-    if re.search(r"\d", text): score += 8
-    if article_in_window(article): score += 6
+    if _contains(text, ["환율", "usd", "fx", "달러", "won"]):
+        score += 24
+    if _contains(text, ["oil", "wti", "crude", "brent", "유가"]):
+        score += 26
+    if _contains(text, ["war", "attack", "missile", "전쟁", "공습", "이란", "israel", "iran"]):
+        score += 22
+    if _contains(text, ["fed", "cpi", "inflation", "yield", "금리", "물가"]):
+        score += 22
+    if _contains(text, ["bitcoin", "btc", "eth", "ethereum", "비트", "코인"]):
+        score += 18
+    if _contains(text, ["trump", "관세", "tariff"]):
+        score += 16
+    if re.search(r"\d", text):
+        score += 8
+    if article_in_window(article):
+        score += 6
     return min(score, 100)
+
 
 def fetch_news_articles(hours_back=36, limit=40):
     try:
-        if hasattr(news_module, "fetch_news"):
-            return news_module.fetch_news(limit=limit, hours_back=hours_back) or []
+        return news_module.fetch_news(limit=limit, hours_back=hours_back) or []
     except TypeError:
         try:
             return news_module.fetch_news() or []
@@ -199,15 +237,14 @@ def fetch_news_articles(hours_back=36, limit=40):
             return []
     except Exception:
         return []
-    return []
+
 
 def fetch_breaking_news_articles(hours_back=12, limit=20):
     try:
-        if hasattr(news_module, "fetch_breaking_news"):
-            return news_module.fetch_breaking_news(limit=limit, hours_back=hours_back) or []
+        return news_module.fetch_breaking_news(limit=limit, hours_back=hours_back) or []
     except Exception:
         return []
-    return []
+
 
 def build_news_rank_items():
     articles = fetch_news_articles(hours_back=36, limit=40)
@@ -244,37 +281,60 @@ def build_news_rank_items():
         out.append(fillers[len(out)])
     return out[:5]
 
+
 def _poly_label(question):
     q = str(question)
-    if _contains(q, ["wti", "oil", "crude", "brent", "유가"]): return "유가 상단 도전"
-    if _contains(q, ["ceasefire", "휴전"]): return "휴전 베팅 확대"
-    if _contains(q, ["hormuz", "호르무즈"]): return "호르무즈 정상화 기대"
-    if _contains(q, ["trump", "트럼프"]): return "트럼프 변수 확대"
-    if _contains(q, ["bitcoin", "btc", "비트"]): return "비트코인 상단 테스트"
-    if _contains(q, ["gold", "금"]): return "금 선호 확대"
-    if _contains(q, ["fed", "cpi", "inflation", "금리"]): return "금리 방향 베팅"
+    if _contains(q, ["wti", "oil", "crude", "brent", "유가"]):
+        return "유가 상단 도전"
+    if _contains(q, ["ceasefire", "휴전"]):
+        return "휴전 베팅 확대"
+    if _contains(q, ["hormuz", "호르무즈"]):
+        return "호르무즈 정상화 기대"
+    if _contains(q, ["trump", "트럼프"]):
+        return "트럼프 변수 확대"
+    if _contains(q, ["bitcoin", "btc", "비트"]):
+        return "비트코인 상단 테스트"
+    if _contains(q, ["gold", "금"]):
+        return "금 선호 확대"
+    if _contains(q, ["fed", "cpi", "inflation", "금리"]):
+        return "금리 방향 베팅"
     return _clean(q, 16)
 
+
 def _to_float(v, default=0.0):
-    try: return float(v)
-    except Exception: return default
+    try:
+        return float(v)
+    except Exception:
+        return default
+
 
 def _poly_score(question, volume, yes_price):
     text = str(question).lower()
     score = 24
     v = _to_float(volume, 0.0)
     p = _to_float(yes_price, 0.0)
-    if v >= 20_000_000: score += 42
-    elif v >= 10_000_000: score += 36
-    elif v >= 5_000_000: score += 28
-    elif v >= 1_000_000: score += 18
-    if 0.10 <= p <= 0.90: score += 14
-    if 0.20 <= p <= 0.80: score += 8
-    if _contains(text, ["oil", "wti", "crude", "brent", "hormuz"]): score += 18
-    if _contains(text, ["bitcoin", "btc", "eth", "ethereum"]): score += 16
-    if _contains(text, ["iran", "israel", "war", "attack", "ceasefire"]): score += 18
-    if _contains(text, ["trump", "tariff", "fed", "cpi", "yield"]): score += 14
+    if v >= 20_000_000:
+        score += 42
+    elif v >= 10_000_000:
+        score += 36
+    elif v >= 5_000_000:
+        score += 28
+    elif v >= 1_000_000:
+        score += 18
+    if 0.10 <= p <= 0.90:
+        score += 14
+    if 0.20 <= p <= 0.80:
+        score += 8
+    if _contains(text, ["oil", "wti", "crude", "brent", "hormuz"]):
+        score += 18
+    if _contains(text, ["bitcoin", "btc", "eth", "ethereum"]):
+        score += 16
+    if _contains(text, ["iran", "israel", "war", "attack", "ceasefire"]):
+        score += 18
+    if _contains(text, ["trump", "tariff", "fed", "cpi", "yield"]):
+        score += 14
     return min(score, 100)
+
 
 def build_poly_rank_items():
     try:
@@ -315,15 +375,27 @@ def build_poly_rank_items():
         out.append(fillers[len(out)])
     return out[:5]
 
+
 def build_market_rank_items(news_items, poly_items):
-    buckets = {"유가 상방 압력": 0, "환율 변동성 확대": 0, "비트코인 강세 유지": 0, "금 선호 강화": 0, "금리 부담 확대": 0}
+    buckets = {
+        "유가 상방 압력": 0,
+        "환율 변동성 확대": 0,
+        "비트코인 강세 유지": 0,
+        "금 선호 강화": 0,
+        "금리 부담 확대": 0,
+    }
     for item in news_items + poly_items:
         label, score = item["label"], item["score"]
-        if _contains(label, ["유가", "호르무즈", "oil", "crude", "wti"]): buckets["유가 상방 압력"] += score
-        if _contains(label, ["환율", "달러", "usd", "fx"]): buckets["환율 변동성 확대"] += score
-        if _contains(label, ["비트", "btc", "코인", "crypto"]): buckets["비트코인 강세 유지"] += score
-        if _contains(label, ["금", "gold", "안전자산"]): buckets["금 선호 강화"] += score
-        if _contains(label, ["금리", "fed", "cpi", "yield"]): buckets["금리 부담 확대"] += score
+        if _contains(label, ["유가", "호르무즈", "oil", "crude", "wti"]):
+            buckets["유가 상방 압력"] += score
+        if _contains(label, ["환율", "달러", "usd", "fx"]):
+            buckets["환율 변동성 확대"] += score
+        if _contains(label, ["비트", "btc", "코인", "crypto"]):
+            buckets["비트코인 강세 유지"] += score
+        if _contains(label, ["금", "gold", "안전자산"]):
+            buckets["금 선호 강화"] += score
+        if _contains(label, ["금리", "fed", "cpi", "yield"]):
+            buckets["금리 부담 확대"] += score
         if _contains(label, ["전쟁", "공습", "지정학", "휴전", "이란", "이스라엘"]):
             buckets["유가 상방 압력"] += 6
             buckets["금 선호 강화"] += 6
@@ -333,10 +405,12 @@ def build_market_rank_items(news_items, poly_items):
     ranked.sort(key=lambda x: x["score"], reverse=True)
     return ranked[:5]
 
+
 def post_regular_rank_cards():
     news_items = build_news_rank_items()
     poly_items = build_poly_rank_items()
     market_items = build_market_rank_items(news_items, poly_items)
+
     paths = create_rank_set(news_items, poly_items, market_items, out_dir=OUT_DIR)
     pack = build_content_pack(news_items, poly_items, market_items)
     reel_path = build_reel(
@@ -346,6 +420,7 @@ def post_regular_rank_cards():
         hook_text=pack["reel_hook"],
         out_path=os.path.join(OUT_DIR, "reel_output.mp4"),
     )
+
     send_media_group(paths)
     send_video(reel_path, caption=pack["reel_hook"])
     send_message(
@@ -362,6 +437,7 @@ def post_regular_rank_cards():
     mark_regular_sent()
     print("[정규 업로드합니다]")
 
+
 def _breaking_news_score(article):
     try:
         return news_module.score_breaking_article(article)
@@ -370,12 +446,11 @@ def _breaking_news_score(article):
         desc = article.get("description", "") or ""
         text = f"{title} {desc}".lower()
         score = 0
-        if re.search(r"\b(reuters|bloomberg|cnbc|wsj|ft|ap|bbc)\b", article.get("source", {}).get("name", "").lower()):
-            score += 30
         for k in ["breaking", "urgent", "attack", "missile", "ceasefire", "oil", "fed", "bitcoin", "tariff"]:
             if k in text:
                 score += 8
         return score
+
 
 def _breaking_poly_score(question, volume, yes_price):
     score = _poly_score(question, volume, yes_price)
@@ -383,11 +458,11 @@ def _breaking_poly_score(question, volume, yes_price):
         score += 10
     return min(score, 100)
 
+
 def post_breaking():
     print("[속보] 뉴스 검사 시작")
     articles = fetch_breaking_news_articles(hours_back=12, limit=20)
     best_news = None
-
     for art in articles[:20]:
         title = art.get("title", "") or ""
         score = _breaking_news_score(art)
@@ -425,7 +500,6 @@ def post_breaking():
     except Exception:
         markets = []
     best_poly = None
-
     for m in markets[:30]:
         q = m.get("question", "")
         vol = m.get("volume24hr", m.get("volume", 0))
@@ -458,6 +532,7 @@ def post_breaking():
     else:
         print("[속보] 폴리 후보 없음 또는 점수 미달")
 
+
 def main():
     os.makedirs(OUT_DIR, exist_ok=True)
     try:
@@ -476,6 +551,7 @@ def main():
         print("[정규 업로드 오류]", repr(e))
         raise
 
+
 if __name__ == "__main__":
-    print("FINAL CONSERVATIVE BREAKING VERSION LOADED")
+    print("FINAL RECHECKED VERSION LOADED")
     main()
