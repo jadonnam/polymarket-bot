@@ -318,6 +318,27 @@ def fetch_breaking_news_articles(hours_back: int = 12, limit: int = 20) -> List[
         return []
 
 
+
+
+def _translate_poly_question(q: str) -> str:
+    low = str(q).lower()
+    if "us x iran meet" in low or "us iran meet" in low or "u.s. x iran" in low:
+        return "미국-이란 회담 변수"
+    if "military action" in low:
+        return "군사 행동 가능성"
+    if "will sevilla fc" in low:
+        return "세비야 경기 베팅"
+    if "trump" in low:
+        return "트럼프 변수 확대"
+    if "bitcoin" in low or "btc" in low:
+        return "비트코인 상단 테스트"
+    if "oil" in low or "wti" in low or "crude" in low or "brent" in low:
+        return "유가 상단 도전"
+    if "ceasefire" in low:
+        return "휴전 베팅 확대"
+    if "hormuz" in low:
+        return "호르무즈 정상화 기대"
+    return q
 def _poly_label(question: str) -> str:
     q = str(question)
     if _contains(q, ["wti", "oil", "crude", "brent", "유가"]): return "유가 상단 도전"
@@ -327,7 +348,7 @@ def _poly_label(question: str) -> str:
     if _contains(q, ["bitcoin", "btc", "비트"]): return "비트코인 상단 테스트"
     if _contains(q, ["gold", "금"]): return "금 선호 확대"
     if _contains(q, ["fed", "cpi", "inflation", "금리"]): return "금리 방향 베팅"
-    return _clean(q)
+    return _clean(_translate_poly_question(q))
 
 
 def _to_float(v, default: float = 0.0) -> float:

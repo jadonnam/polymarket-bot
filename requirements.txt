@@ -6,5 +6,5 @@ imageio-ffmpeg
 numpy
 instagrapi
 openai
-threads-api
+threads-py-wrapper
 threadspy
