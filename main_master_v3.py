@@ -408,7 +408,7 @@ def post_regular_rank_cards() -> None:
     # 아침/저녁 둘 다 인스타 릴스 자동업로드
     if upload_reel is not None:
         try:
-            upload_reel(reel_path, pack["reel_hook"])
+            upload_reel(reel_path, pack["reel_caption"])
             print("[인스타 릴스 자동업로드 완료]")
         except Exception as e:
             print(f"[인스타 릴스 업로드 오류] {repr(e)}")
