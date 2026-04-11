@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timedelta, timezone
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, List, Optional
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -12,6 +12,9 @@ BG_COLOR = (8, 10, 18)
 TEXT_COLOR = (242, 244, 247)
 SUB_TEXT_COLOR = (132, 138, 150)
 BAR_BG = (44, 50, 66)
+POS_COLOR = (79, 209, 125)
+NEG_COLOR = (255, 107, 107)
+FLAT_COLOR = (145, 152, 165)
 
 ACCENT_NEWS = (214, 221, 232)
 ACCENT_POLY = (247, 175, 74)
@@ -19,9 +22,6 @@ ACCENT_MARKET = (88, 202, 182)
 
 BASE_DIR = os.path.dirname(__file__)
 FONT_DIR = os.path.join(BASE_DIR, "fonts")
-
-
-# item shape: {label:str, score:int, delta:int|None, meta:str|None}
 
 
 def _font_candidates(bold: bool = True):
@@ -89,17 +89,21 @@ def _page_style(page_type: str) -> Dict[str, object]:
         return {"title": "뉴스", "subtitle": "지난 구간 핵심 이슈", "accent": ACCENT_NEWS, "footer": "NEWS"}
     if page_type == "poly":
         return {"title": "폴리마켓", "subtitle": "베팅이 몰린 흐름", "accent": ACCENT_POLY, "footer": "POLYMARKET"}
-    return {"title": "시장 반응", "subtitle": "가격이 반응한 구간", "accent": ACCENT_MARKET, "footer": "MARKET"}
+    return {"title": "시장 반응", "subtitle": "가격이 먼저 움직인 구간", "accent": ACCENT_MARKET, "footer": "MARKET"}
 
 
-def _delta_text(delta: Optional[int]) -> str:
+def _delta_display(delta: Optional[int]) -> tuple[str, tuple[int, int, int]]:
     if delta is None:
-        return ""
+        return "", FLAT_COLOR
+    try:
+        delta = int(delta)
+    except Exception:
+        return "", FLAT_COLOR
     if delta > 0:
-        return f"▲{delta}"
+        return f"▲{delta}%", POS_COLOR
     if delta < 0:
-        return f"▼{abs(delta)}"
-    return "0"
+        return f"▼{abs(delta)}%", NEG_COLOR
+    return "0%", FLAT_COLOR
 
 
 def draw_card(page_type: str, items: List[Dict], out_path: str, generated_at_text: Optional[str] = None) -> str:
@@ -108,11 +112,12 @@ def draw_card(page_type: str, items: List[Dict], out_path: str, generated_at_tex
     draw = ImageDraw.Draw(img)
 
     brand_font = get_font(22, bold=False)
-    title_font = get_font(84, bold=True)
+    title_font = get_font(82, bold=True)
     sub_font = get_font(28, bold=False)
-    item_font = get_font(48, bold=True)
+    item_font = get_font(46, bold=True)
     rank_font = get_font(28, bold=True)
-    score_font = get_font(42, bold=True)
+    score_font = get_font(34, bold=True)
+    delta_font = get_font(24, bold=True)
     meta_font = get_font(24, bold=False)
     foot_font = get_font(18, bold=False)
 
@@ -123,20 +128,20 @@ def draw_card(page_type: str, items: List[Dict], out_path: str, generated_at_tex
     accent = style["accent"]
 
     title_w = _text_width(draw, title, title_font)
-    draw.text(((WIDTH - title_w) // 2, 132), title, fill=TEXT_COLOR, font=title_font)
+    draw.text(((WIDTH - title_w) // 2, 126), title, fill=TEXT_COLOR, font=title_font)
 
     sub_w = _text_width(draw, subtitle, sub_font)
-    draw.text(((WIDTH - sub_w) // 2, 234), subtitle, fill=SUB_TEXT_COLOR, font=sub_font)
+    draw.text(((WIDTH - sub_w) // 2, 224), subtitle, fill=SUB_TEXT_COLOR, font=sub_font)
 
-    underline_w = 110
-    draw.rounded_rectangle(((WIDTH - underline_w) // 2, 290, (WIDTH + underline_w) // 2, 294), radius=2, fill=accent)
+    underline_w = 120
+    draw.rounded_rectangle(((WIDTH - underline_w) // 2, 282, (WIDTH + underline_w) // 2, 288), radius=3, fill=accent)
 
-    start_y = 360
-    row_gap = 175
-    label_x = 150
-    bar_x = 150
-    bar_w = 840
-    bar_h = 16
+    start_y = 340
+    row_gap = 170
+    label_x = 140
+    bar_x = 140
+    bar_w = 790
+    bar_h = 18
 
     cleaned: List[Dict] = []
     seen = set()
@@ -161,32 +166,25 @@ def draw_card(page_type: str, items: List[Dict], out_path: str, generated_at_tex
 
     for idx, item in enumerate(cleaned, start=1):
         y = start_y + (idx - 1) * row_gap
-        rank_text = f"{idx:02d}"
-        draw.text((60, y + 6), rank_text, fill=SUB_TEXT_COLOR, font=rank_font)
+        draw.text((60, y + 6), f"{idx:02d}", fill=SUB_TEXT_COLOR, font=rank_font)
 
-        label_max_w = 620 if idx == 1 else 660
-        label = _trim_text(draw, item["label"], item_font, label_max_w)
+        label = _trim_text(draw, item["label"], item_font, 610)
         draw.text((label_x, y), label, fill=TEXT_COLOR, font=item_font)
 
         score_text = f"{item['score']}%"
         score_w = _text_width(draw, score_text, score_font)
         score_x = WIDTH - 60 - score_w
-        draw.text((score_x, y - 2), score_text, fill=accent, font=score_font)
+        draw.text((score_x, y + 4), score_text, fill=accent, font=score_font)
 
-        delta_text = _delta_text(item.get("delta"))
+        delta_text, delta_color = _delta_display(item.get("delta"))
         if delta_text:
-            delta_w = _text_width(draw, delta_text, meta_font)
-            draw.text((score_x - delta_w - 16, y + 9), delta_text, fill=SUB_TEXT_COLOR, font=meta_font)
-        elif idx == 1:
-            meta = "중요도"
-            meta_w = _text_width(draw, meta, meta_font)
-            draw.text((score_x - meta_w - 14, y + 10), meta, fill=SUB_TEXT_COLOR, font=meta_font)
+            delta_w = _text_width(draw, delta_text, delta_font)
+            draw.text((score_x - delta_w - 14, y + 12), delta_text, fill=delta_color, font=delta_font)
 
         _draw_bar(draw, bar_x, y + 78, bar_w, bar_h, item["score"], accent)
 
     time_text = f"기준 {generated_at_text or now_kst_text()}"
     draw.text((60, HEIGHT - 72), time_text, fill=SUB_TEXT_COLOR, font=meta_font)
-
     footer = style["footer"]
     foot_w = _text_width(draw, footer, foot_font)
     draw.text((WIDTH - 60 - foot_w, HEIGHT - 68), footer, fill=SUB_TEXT_COLOR, font=foot_font)

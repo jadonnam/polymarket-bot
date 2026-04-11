@@ -5,3 +5,4 @@ imageio
 imageio-ffmpeg
 numpy
 instagrapi
+openai

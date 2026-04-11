@@ -183,18 +183,22 @@ def article_in_window(article: Dict[str, Any]) -> bool:
     return start_utc <= dt <= end_utc
 
 
-def _news_label(title: str) -> str:
-    t = str(title)
+def _news_label(article: Dict[str, Any]) -> str:
+    title = str(article.get("title", "") or "")
+    desc = str(article.get("description", "") or article.get("content", "") or "")
+    text = f"{title} {desc}"
+    t = text.lower()
     if _contains(t, ["strait of hormuz", "hormuz", "호르무즈"]): return "호르무즈 변수 확대"
-    if _contains(t, ["환율", "달러", "usd", "fx", "won"]): return "환율 변동성 확대"
-    if _contains(t, ["유가", "oil", "wti", "crude", "brent"]): return "유가 상방 압력"
+    if _contains(t, ["iran", "israel", "war", "attack", "missile", "drone", "ceasefire", "전쟁", "공습", "휴전"]): return "중동 리스크 재부각"
+    if _contains(t, ["oil", "wti", "crude", "brent", "유가"]): return "유가 상방 압력"
+    if _contains(t, ["usd", "dollar", "fx", "won", "달러", "환율"]): return "환율 변동성 확대"
     if _contains(t, ["bitcoin", "btc", "비트"]): return "비트코인 강세 유지"
     if _contains(t, ["ethereum", "eth", "이더"]): return "이더 강세 유지"
-    if _contains(t, ["금리", "fed", "cpi", "inflation", "yield"]): return "금리 완화 기대"
-    if _contains(t, ["trump", "트럼프", "tariff", "관세"]): return "트럼프 변수 확대"
-    if _contains(t, ["iran", "israel", "war", "attack", "전쟁", "이란", "이스라엘", "공습"]): return "지정학 리스크 확대"
-    if _contains(t, ["gold", "금값", "금"]): return "안전자산 선호"
-    return _clean(t)
+    if _contains(t, ["fed", "rate", "cpi", "inflation", "yield", "금리", "물가"]): return "금리 완화 기대 확대"
+    if _contains(t, ["gold", "safe haven", "금", "금값"]): return "안전자산 선호 확대"
+    if _contains(t, ["trump", "tariff", "trade deal", "관세", "트럼프"]): return "트럼프 변수 확대"
+    if _contains(t, ["nasdaq", "s&p", "dow", "stocks", "equity"]): return "주식시장 민감도 확대"
+    return "핵심 시장 이슈 부각"
 
 
 def _news_score(article: Dict[str, Any]) -> int:
@@ -233,15 +237,17 @@ def fetch_breaking_news_articles(hours_back: int = 12, limit: int = 20) -> List[
 
 
 def _poly_label(question: str) -> str:
-    q = str(question)
-    if _contains(q, ["wti", "oil", "crude", "brent", "유가"]): return "유가 상단 도전"
-    if _contains(q, ["ceasefire", "휴전"]): return "휴전 베팅 확대"
+    q = str(question).lower()
     if _contains(q, ["hormuz", "호르무즈"]): return "호르무즈 정상화 기대"
-    if _contains(q, ["trump", "트럼프"]): return "트럼프 변수 확대"
+    if _contains(q, ["ceasefire", "휴전"]): return "휴전 베팅 확대"
+    if _contains(q, ["iran", "israel", "war", "attack"]): return "중동 리스크 베팅 확대"
+    if _contains(q, ["wti", "oil", "crude", "brent", "유가"]): return "유가 상단 도전"
     if _contains(q, ["bitcoin", "btc", "비트"]): return "비트코인 상단 테스트"
+    if _contains(q, ["ethereum", "eth", "이더"]): return "이더 상단 테스트"
+    if _contains(q, ["trump", "트럼프", "tariff"]): return "트럼프 변수 확대"
     if _contains(q, ["gold", "금"]): return "금 선호 확대"
     if _contains(q, ["fed", "cpi", "inflation", "금리"]): return "금리 방향 베팅"
-    return _clean(q)
+    return "시장 방향 베팅 확대"
 
 
 def _to_float(v, default: float = 0.0) -> float:
@@ -323,7 +329,7 @@ def build_news_rank_items() -> List[Dict[str, Any]]:
     scored = []
     seen = set()
     for art in articles:
-        label = _news_label(art.get("title", ""))
+        label = _news_label(art)
         if label in seen:
             continue
         seen.add(label)
@@ -396,7 +402,7 @@ def post_regular_rank_cards() -> None:
 
     # 텔레그램 전송
     send_media_group(paths)
-    send_video(reel_path, caption=pack["reel_hook"])
+    send_video(reel_path, caption=pack["reel_caption"])
     send_message(
         f"[커버 후보]\n{pack['cover_candidates']}\n\n"
         f"[피드 캡션]\n{pack['feed_caption']}\n\n"
@@ -408,7 +414,7 @@ def post_regular_rank_cards() -> None:
     # 아침/저녁 둘 다 인스타 릴스 자동업로드
     if upload_reel is not None:
         try:
-            upload_reel(reel_path, pack["reel_caption"])
+            upload_reel(reel_path, pack["reel_caption"])  # 인스타 추천 음악 자동 지정은 API 미지원
             print("[인스타 릴스 자동업로드 완료]")
         except Exception as e:
             print(f"[인스타 릴스 업로드 오류] {repr(e)}")
