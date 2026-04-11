@@ -478,7 +478,8 @@ def post_regular_rank_cards() -> None:
 
     paths = create_rank_set(news_items, poly_items, market_items, out_dir=OUT_DIR, generated_at_text=generated_at_text())
     pack = build_content_pack(news_items, poly_items, market_items)
-    reel_path = build_reel(paths[0], paths[1], paths[2], pack["reel_hook"], os.path.join(OUT_DIR, "reel_output.mp4"))
+    top_labels = [news_items[0]["label"], poly_items[0]["label"], market_items[0]["label"]]
+    reel_path = build_reel(paths[0], paths[1], paths[2], pack["reel_hook"], os.path.join(OUT_DIR, "reel_output.mp4"), top_labels=top_labels)
 
     # 텔레그램 전송
     send_media_group(paths)

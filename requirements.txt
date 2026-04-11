@@ -7,3 +7,4 @@ numpy
 instagrapi
 openai
 threads-api
+threadspy
