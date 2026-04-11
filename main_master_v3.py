@@ -15,9 +15,10 @@ from reels_maker_final import build_reel
 from reels_packager import build_content_pack
 
 try:
-    from instagram_v2 import upload_instagram  # type: ignore
+    from instagram_v2 import upload_instagram, upload_reel
 except Exception:
     upload_instagram = None
+    upload_reel = None
 
 REGULAR_STATE_FILE = "regular_rank_state.json"
 BREAKING_STATE_FILE = "breaking_state.json"
@@ -184,24 +185,15 @@ def article_in_window(article: Dict[str, Any]) -> bool:
 
 def _news_label(title: str) -> str:
     t = str(title)
-    if _contains(t, ["strait of hormuz", "hormuz", "호르무즈"]):
-        return "호르무즈 변수 확대"
-    if _contains(t, ["환율", "달러", "usd", "fx", "won"]):
-        return "환율 변동성 확대"
-    if _contains(t, ["유가", "oil", "wti", "crude", "brent"]):
-        return "유가 상방 압력"
-    if _contains(t, ["bitcoin", "btc", "비트"]):
-        return "비트코인 강세 유지"
-    if _contains(t, ["ethereum", "eth", "이더"]):
-        return "이더 강세 유지"
-    if _contains(t, ["금리", "fed", "cpi", "inflation", "yield"]):
-        return "금리 완화 기대"
-    if _contains(t, ["trump", "트럼프", "tariff", "관세"]):
-        return "트럼프 변수 확대"
-    if _contains(t, ["iran", "israel", "war", "attack", "전쟁", "이란", "이스라엘", "공습"]):
-        return "지정학 리스크 확대"
-    if _contains(t, ["gold", "금값", "금"]):
-        return "안전자산 선호"
+    if _contains(t, ["strait of hormuz", "hormuz", "호르무즈"]): return "호르무즈 변수 확대"
+    if _contains(t, ["환율", "달러", "usd", "fx", "won"]): return "환율 변동성 확대"
+    if _contains(t, ["유가", "oil", "wti", "crude", "brent"]): return "유가 상방 압력"
+    if _contains(t, ["bitcoin", "btc", "비트"]): return "비트코인 강세 유지"
+    if _contains(t, ["ethereum", "eth", "이더"]): return "이더 강세 유지"
+    if _contains(t, ["금리", "fed", "cpi", "inflation", "yield"]): return "금리 완화 기대"
+    if _contains(t, ["trump", "트럼프", "tariff", "관세"]): return "트럼프 변수 확대"
+    if _contains(t, ["iran", "israel", "war", "attack", "전쟁", "이란", "이스라엘", "공습"]): return "지정학 리스크 확대"
+    if _contains(t, ["gold", "금값", "금"]): return "안전자산 선호"
     return _clean(t)
 
 
@@ -402,6 +394,7 @@ def post_regular_rank_cards() -> None:
     pack = build_content_pack(news_items, poly_items, market_items)
     reel_path = build_reel(paths[0], paths[1], paths[2], pack["reel_hook"], os.path.join(OUT_DIR, "reel_output.mp4"))
 
+    # 텔레그램 전송
     send_media_group(paths)
     send_video(reel_path, caption=pack["reel_hook"])
     send_message(
@@ -411,6 +404,17 @@ def post_regular_rank_cards() -> None:
         f"[해시태그]\n{pack['hashtags']}\n\n"
         f"[CTA]\n{pack['cta']}"
     )
+
+    # 아침 슬롯에만 인스타 릴스 자동업로드
+    slot = current_regular_slot()
+    is_morning = (slot == "morning") or FORCE_REGULAR_NOW
+    if is_morning and upload_reel is not None:
+        try:
+            upload_reel(reel_path, pack["reel_hook"])
+            print("[인스타 릴스 자동업로드 완료]")
+        except Exception as e:
+            print(f"[인스타 릴스 업로드 오류] {repr(e)}")
+
     mark_regular_sent()
     print("[정규 업로드 완료]")
 

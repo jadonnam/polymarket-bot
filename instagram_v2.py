@@ -28,12 +28,10 @@ def login_with_session(cl: Client):
 def upload_instagram(image_path, caption):
     if not USERNAME or not PASSWORD:
         raise RuntimeError("INSTAGRAM_USERNAME / INSTAGRAM_PASSWORD 없음")
-
     if not os.path.exists(image_path):
         raise RuntimeError(f"이미지 파일 없음: {image_path}")
 
     cl = Client()
-
     try:
         login_with_session(cl)
     except Exception as e:
@@ -42,14 +40,37 @@ def upload_instagram(image_path, caption):
 
     try:
         final_caption = caption.strip() + "\n\n" + HASHTAGS
-
         print(f"[인스타 업로드] {image_path}")
         media = cl.photo_upload(image_path, final_caption)
         print(f"[인스타 업로드 성공] media_pk={getattr(media, 'pk', None)}")
-
         cl.dump_settings(SESSION_PATH)
         return media
-
     except Exception as e:
         print(f"[인스타 업로드 실패] {repr(e)}")
+        return
+
+
+def upload_reel(video_path, caption):
+    """릴스 자동업로드"""
+    if not USERNAME or not PASSWORD:
+        raise RuntimeError("INSTAGRAM_USERNAME / INSTAGRAM_PASSWORD 없음")
+    if not os.path.exists(video_path):
+        raise RuntimeError(f"영상 파일 없음: {video_path}")
+
+    cl = Client()
+    try:
+        login_with_session(cl)
+    except Exception as e:
+        print(f"[인스타 로그인 실패] {repr(e)}")
+        return
+
+    try:
+        final_caption = caption.strip() + "\n\n" + HASHTAGS
+        print(f"[인스타 릴스 업로드] {video_path}")
+        media = cl.clip_upload(video_path, final_caption)
+        print(f"[인스타 릴스 업로드 성공] media_pk={getattr(media, 'pk', None)}")
+        cl.dump_settings(SESSION_PATH)
+        return media
+    except Exception as e:
+        print(f"[인스타 릴스 업로드 실패] {repr(e)}")
         return
