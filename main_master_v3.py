@@ -20,9 +20,20 @@ except Exception:
     upload_instagram = None
     upload_reel = None
 
+try:
+    from threads_auto import (
+        run_jadonnam_top5_post,
+        run_jadonnam_midday_post,
+        run_omniflow_single,
+    )
+    THREADS_ENABLED = True
+except Exception:
+    THREADS_ENABLED = False
+
 REGULAR_STATE_FILE = "regular_rank_state.json"
 BREAKING_STATE_FILE = "breaking_state.json"
 SCORE_HISTORY_FILE = "score_history.json"
+THREADS_MIDDAY_STATE_FILE = "threads_midday_state.json"
 OUT_DIR = "output_rank"
 
 REGULAR_POST_MINUTE_WINDOW = 90
@@ -31,6 +42,9 @@ BREAKING_NEWS_MIN_SCORE = 108
 BREAKING_POLY_MIN_SCORE = 92
 USE_INSTAGRAM_FOR_BREAKING = (os.getenv("USE_INSTAGRAM_FOR_BREAKING") or "false").lower() == "true"
 FORCE_REGULAR_NOW = (os.getenv("FORCE_REGULAR_NOW") or "false").lower() == "true"
+
+# 스레드 중간 포스팅 시간 (KST 시간 기준)
+THREADS_MIDDAY_HOURS = [9, 13, 17, 21]
 
 
 def now_kst() -> datetime:
@@ -103,6 +117,78 @@ def mark_regular_sent() -> None:
         state["last_evening_date"] = today
     save_regular_state(state)
 
+
+# ── 스레드 중간 포스팅 중복 방지 ────────────────────────────
+
+def already_sent_threads_midday(hour: int) -> bool:
+    state = _load_json(THREADS_MIDDAY_STATE_FILE, {})
+    today = now_kst().strftime("%Y-%m-%d")
+    key = f"{today}_{hour}"
+    return state.get(key) is True
+
+
+def mark_threads_midday_sent(hour: int) -> None:
+    state = _load_json(THREADS_MIDDAY_STATE_FILE, {})
+    today = now_kst().strftime("%Y-%m-%d")
+    key = f"{today}_{hour}"
+    state[key] = True
+    # 오래된 키 정리 (최근 48시간치만 유지)
+    keys_to_keep = {}
+    for k, v in state.items():
+        try:
+            date_str = k.rsplit("_", 1)[0]
+            dt = datetime.strptime(date_str, "%Y-%m-%d")
+            if (now_kst().date() - dt.date()).days <= 2:
+                keys_to_keep[k] = v
+        except Exception:
+            pass
+    keys_to_keep[key] = True
+    _save_json(THREADS_MIDDAY_STATE_FILE, keys_to_keep)
+
+
+def should_run_threads_midday() -> Optional[int]:
+    now = now_kst()
+    hour = now.hour
+    minute = now.minute
+    # 정해진 시간이고 30분 이내이고 아직 안 보냈으면
+    if hour in THREADS_MIDDAY_HOURS and minute < 30:
+        if not already_sent_threads_midday(hour):
+            return hour
+    return None
+
+
+# ── 스레드 중간 포스팅 실행 ──────────────────────────────────
+
+def run_threads_midday(hour: int) -> None:
+    if not THREADS_ENABLED:
+        return
+    try:
+        is_news_turn = hour in [9, 17]
+        top_news = []
+        if is_news_turn:
+            try:
+                articles = news_module.fetch_news(limit=5, hours_back=12) or []
+                for art in articles[:3]:
+                    top_news.append({
+                        "label": art.get("title", "")[:40],
+                        "title": art.get("title", ""),
+                    })
+            except Exception:
+                pass
+
+        # 자영업 공감글
+        run_omniflow_single()
+
+        # 자돈남 경제 단신
+        run_jadonnam_midday_post(top_news=top_news, is_news_turn=is_news_turn)
+
+        mark_threads_midday_sent(hour)
+        print(f"[스레드 중간 포스팅 완료] {hour}시")
+    except Exception as e:
+        print(f"[스레드 중간 포스팅 오류] {repr(e)}")
+
+
+# ── 나머지 함수들 ────────────────────────────────────────────
 
 def load_breaking_state() -> Dict[str, List[Dict[str, str]]]:
     return _load_json(BREAKING_STATE_FILE, {"items": []})
@@ -405,13 +491,21 @@ def post_regular_rank_cards() -> None:
         f"[CTA]\n{pack['cta']}"
     )
 
-    # 아침/저녁 둘 다 인스타 릴스 자동업로드
+    # 인스타 릴스 자동업로드
     if upload_reel is not None:
         try:
             upload_reel(reel_path, pack["reel_caption"])
             print("[인스타 릴스 자동업로드 완료]")
         except Exception as e:
             print(f"[인스타 릴스 업로드 오류] {repr(e)}")
+
+    # 자돈남 스레드 TOP5 — 뉴스/폴리마켓/시장반응 3개 따로
+    if THREADS_ENABLED:
+        try:
+            run_jadonnam_top5_post(news_items, poly_items, market_items)
+            print("[자돈남 스레드 TOP5 완료]")
+        except Exception as e:
+            print(f"[자돈남 스레드 오류] {repr(e)}")
 
     mark_regular_sent()
     print("[정규 업로드 완료]")
@@ -497,10 +591,14 @@ def post_breaking() -> None:
 
 def main() -> None:
     os.makedirs(OUT_DIR, exist_ok=True)
+
+    # 속보 체크
     try:
         post_breaking()
     except Exception as e:
         print("[속보 처리 오류]", repr(e))
+
+    # 정규 업로드 (08시 / 19시)
     try:
         if should_run_regular_post():
             if already_sent_regular():
@@ -512,6 +610,17 @@ def main() -> None:
     except Exception as e:
         print("[정규 업로드 오류]", repr(e))
         raise
+
+    # 스레드 중간 포스팅 (09 / 13 / 17 / 21시)
+    try:
+        target_hour = should_run_threads_midday()
+        if target_hour is not None:
+            print(f"[스레드 중간 포스팅] {target_hour}시 실행")
+            run_threads_midday(target_hour)
+        else:
+            print("[스레드 중간 포스팅 시간 아님]")
+    except Exception as e:
+        print("[스레드 중간 포스팅 오류]", repr(e))
 
 
 if __name__ == "__main__":
