@@ -29,21 +29,18 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 def post_to_threads(username: str, password: str, text: str) -> bool:
     try:
         import threadspy
-
-        threads_api = threadspy.ThreadsApi(username, password)
-        login_status = threads_api.login()
-
-        if not login_status:
+        api = threadspy.ThreadsApi(username, password)
+        if not api.login():
             print(f"[Threads] 업로드 실패: 로그인 실패 ({username})")
             return False
-
-        threads_api.create(text=text)
+        api.create(text=text)
         print(f"[Threads] 업로드 성공: {username}")
         return True
-
     except Exception as e:
         print(f"[Threads] 업로드 실패: {repr(e)}")
         return False
+
+
 
 # ── 자영업 ───────────────────────────────────────────────────
 
@@ -307,10 +304,15 @@ def run_jadonnam_top5_post(news_items: list, poly_items: list, market_items: lis
         return
     print("[자돈남] TOP5 3개 글 생성 중...")
     texts = generate_jadonnam_top5_separate(news_items, poly_items, market_items)
+    labels = ["뉴스", "폴리마켓", "시장반응"]
+    ok_count = 0
     for i, text in enumerate(texts):
-        labels = ["뉴스", "폴리마켓", "시장반응"]
-        print(f"[자돈남 {labels[i]}]\n{text}\n")
-        post_to_threads(JADONNAM_USERNAME, JADONNAM_PASSWORD, text)
+        print(f"[자돈남 {labels[i]}]
+{text}
+")
+        if post_to_threads(JADONNAM_USERNAME, JADONNAM_PASSWORD, text):
+            ok_count += 1
+    print(f"[자돈남 스레드 TOP5 결과] 성공 {ok_count}/{len(texts)}")
 
 
 if __name__ == "__main__":

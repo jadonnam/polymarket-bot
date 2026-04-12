@@ -355,6 +355,22 @@ def _poly_score(question: str, volume: Any, yes_price: Any) -> int:
     return min(score, 100)
 
 
+def _is_relevant_poly_question(question: str) -> bool:
+    q = str(question or "").lower()
+    include = [
+        "oil", "wti", "crude", "brent", "hormuz", "iran", "israel", "war", "attack", "ceasefire",
+        "bitcoin", "btc", "ethereum", "eth", "crypto", "fed", "cpi", "inflation", "yield", "rate",
+        "trump", "tariff", "gold", "usd", "dollar", "fx", "won", "election", "recession"
+    ]
+    exclude = [
+        "fc", "mlb", "nba", "nfl", "nhl", "golf", "mcilroy", "sevilla", "champions league",
+        "match", "tournament", "player", "score", "goal", "tennis", "baseball", "soccer", "f1", "formula 1"
+    ]
+    if any(x in q for x in exclude):
+        return False
+    return any(x in q for x in include)
+
+
 def build_poly_rank_items() -> List[Dict[str, Any]]:
     try:
         markets = get_polymarket_markets()
@@ -372,6 +388,8 @@ def build_poly_rank_items() -> List[Dict[str, Any]]:
     seen = set()
     for m in markets:
         q = m.get("question", "")
+        if not _is_relevant_poly_question(q):
+            continue
         label = _poly_label(q)
         if label in seen:
             continue
@@ -429,18 +447,41 @@ def build_news_rank_items() -> List[Dict[str, Any]]:
 
 
 def build_market_rank_items(news_items: List[Dict[str, Any]], poly_items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    buckets = {"유가 상방 압력": 0, "환율 변동성 확대": 0, "비트코인 강세 유지": 0, "금 선호 강화": 0, "금리 부담 확대": 0}
+    buckets = {
+        "유가 상방 압력": 0,
+        "환율 변동성 확대": 0,
+        "비트코인 강세 유지": 0,
+        "금 선호 강화": 0,
+        "금리 부담 확대": 0,
+    }
     for item in news_items + poly_items:
-        label, score = item["label"], item["score"]
+        label, score = item["label"], int(item["score"])
         if _contains(label, ["유가", "호르무즈", "oil", "crude", "wti"]): buckets["유가 상방 압력"] += score
         if _contains(label, ["환율", "달러", "usd", "fx"]): buckets["환율 변동성 확대"] += score
         if _contains(label, ["비트", "btc", "코인", "crypto"]): buckets["비트코인 강세 유지"] += score
         if _contains(label, ["금", "gold", "안전자산"]): buckets["금 선호 강화"] += score
         if _contains(label, ["금리", "fed", "cpi", "yield"]): buckets["금리 부담 확대"] += score
         if _contains(label, ["전쟁", "공습", "지정학", "휴전", "이란", "이스라엘"]):
-            buckets["유가 상방 압력"] += 6
-            buckets["금 선호 강화"] += 6
-    ranked = [{"label": k, "score": min(100, max(55, int(v / 2) if v > 0 else 55))} for k, v in buckets.items()]
+            buckets["유가 상방 압력"] += 8
+            buckets["금 선호 강화"] += 7
+            buckets["환율 변동성 확대"] += 5
+
+    values = list(buckets.values())
+    max_v = max(values) if values else 0
+    if max_v <= 0:
+        return [
+            {"label": "유가 상방 압력", "score": 78},
+            {"label": "환율 변동성 확대", "score": 71},
+            {"label": "비트코인 강세 유지", "score": 68},
+            {"label": "금 선호 강화", "score": 64},
+            {"label": "금리 부담 확대", "score": 60},
+        ]
+
+    ranked = []
+    for k, v in buckets.items():
+        normalized = 44 + int((v / max_v) * 46)
+        ranked.append({"label": k, "score": max(38, min(92, normalized))})
+
     ranked.sort(key=lambda x: x["score"], reverse=True)
     return ranked[:5]
 
