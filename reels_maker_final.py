@@ -365,6 +365,7 @@ def build_reel(
     market_path: str = "output_rank/rank_market.jpg",
     hook_text: str = "지금 시장이 먼저 반응한 이슈",
     out_path: str = "output_rank/reel_output.mp4",
+    top_labels: Optional[list[str]] = None,
 ) -> str:
     Path("output_rank").mkdir(exist_ok=True)
 
