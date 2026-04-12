@@ -300,14 +300,10 @@ def run_jadonnam_top5_post(news_items: list, poly_items: list, market_items: lis
         return
     print("[자돈남] TOP5 3개 글 생성 중...")
     texts = generate_jadonnam_top5_separate(news_items, poly_items, market_items)
-    labels = ["뉴스", "폴리마켓", "시장반응"]
-    ok_count = 0
     for i, text in enumerate(texts):
+        labels = ["뉴스", "폴리마켓", "시장반응"]
         print(f"[자돈남 {labels[i]}]\n{text}\n")
-        ok = post_to_threads(JADONNAM_USERNAME, JADONNAM_PASSWORD, text)
-        if ok:
-            ok_count += 1
-    print(f"[자돈남 스레드 TOP5 결과] 성공 {ok_count}/{len(texts)}")
+        post_to_threads(JADONNAM_USERNAME, JADONNAM_PASSWORD, text)
 
 
 if __name__ == "__main__":
