@@ -6,4 +6,3 @@ imageio-ffmpeg
 numpy
 instagrapi
 openai
-threads-py-wrapper
