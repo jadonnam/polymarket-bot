@@ -28,15 +28,22 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 
 def post_to_threads(username: str, password: str, text: str) -> bool:
     try:
-        from threadspy import ThreadsAPI
-        api = ThreadsAPI(username=username, password=password)
-        api.publish(caption=text)
+        import threadspy
+
+        threads_api = threadspy.ThreadsApi(username, password)
+        login_status = threads_api.login()
+
+        if not login_status:
+            print(f"[Threads] 업로드 실패: 로그인 실패 ({username})")
+            return False
+
+        threads_api.create(text=text)
         print(f"[Threads] 업로드 성공: {username}")
         return True
+
     except Exception as e:
         print(f"[Threads] 업로드 실패: {repr(e)}")
         return False
-
 
 # ── 자영업 ───────────────────────────────────────────────────
 
