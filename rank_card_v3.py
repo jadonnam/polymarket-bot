@@ -19,6 +19,10 @@ ACCENT_NEWS = (214, 221, 232)
 ACCENT_POLY = (247, 175, 74)
 ACCENT_MARKET = (88, 202, 182)
 
+UP_COLOR = (83, 214, 150)
+DOWN_COLOR = (255, 118, 118)
+FLAT_COLOR = (160, 166, 178)
+
 FONT_DIR = "fonts"
 
 
@@ -47,7 +51,7 @@ def _safe_score(v) -> int:
 
 
 def _text_width(draw, text, font) -> int:
-    box = draw.textbbox((0, 0), text, font=font)
+    box = draw.textbbox((0, 0), str(text), font=font)
     return box[2] - box[0]
 
 
@@ -80,63 +84,80 @@ def _page_style(page_type: str) -> Dict[str, object]:
     return {"title": "시장 반응", "subtitle": "가격이 먼저 움직인 구간", "accent": ACCENT_MARKET, "footer": "MARKET"}
 
 
-def _delta_text(delta: Optional[int]) -> str:
-    if delta is None:
-        return ""
-    if delta > 0:
-        return f"▲{abs(delta)}%"
-    if delta < 0:
-        return f"▼{abs(delta)}%"
-    return "0%"
+def _normalize_ws(text: str) -> str:
+    return re.sub(r"\s+", " ", str(text or "").strip())
 
 
-def _translate_label(label: str) -> str:
-    s = re.sub(r"\s+", " ", str(label).strip())
-    low = s.lower()
+def _translate_poly_label(text: str) -> str:
+    t = _normalize_ws(text)
+    low = t.lower()
 
-    mapping = [
-        ("us x iran meetin", "미국-이란 회담 변수"),
-        ("us x iran", "미국-이란 회담 변수"),
-        ("military action", "군사 행동 가능성"),
-        ("will sevilla fc", "세비야 경기 베팅"),
-        ("sevilla fc", "세비야 경기 베팅"),
-        ("trump", "트럼프 변수 확대"),
-        ("oil hits $100", "유가 100달러 베팅"),
-        ("oil hit $100", "유가 100달러 베팅"),
-        ("ceasefire", "휴전 가능성 확대"),
-        ("bitcoin", "비트코인 강세 유지"),
-        ("btc", "비트코인 강세 유지"),
-        ("ethereum", "이더 강세 유지"),
-        ("eth", "이더 강세 유지"),
-        ("hormuz", "호르무즈 변수 확대"),
-        ("gold", "금 선호 강화"),
-        ("fed", "연준 변수 확대"),
-        ("cpi", "물가 변수 확대"),
-        ("usd", "달러 강세 변수"),
-    ]
-    for k, v in mapping:
+    direct = {
+        "us x iran meetin": "미국-이란 회담 변수",
+        "us x iran meeting": "미국-이란 회담 변수",
+        "military action": "군사 행동 가능성",
+        "will the next pr": "다음 발표 변수",
+        "will rory mcilro": "로리 매킬로이 베팅",
+        "will sevilla fc": "세비야 경기 베팅",
+    }
+    for k, v in direct.items():
         if k in low:
             return v
 
-    # question-like cleanup
-    s = s.replace("Will ", "").replace("will ", "")
-    s = s.replace("?", "").strip()
-    if len(s) > 0 and re.search(r"[A-Za-z]", s):
-        return _clean_english_like(s)
-    return s
-
-
-def _clean_english_like(s: str) -> str:
-    low = s.lower()
-    if "iran" in low and "meeting" in low:
+    if "iran" in low and ("meet" in low or "talk" in low):
         return "미국-이란 회담 변수"
-    if "military" in low:
+    if "military" in low or "strike" in low or "attack" in low:
         return "군사 행동 가능성"
-    if "rate cut" in low:
-        return "금리 인하 기대"
-    if "tariff" in low:
-        return "관세 변수 확대"
-    return s[:14]
+    if "oil" in low or "wti" in low or "crude" in low or "brent" in low:
+        return "유가 상단 도전"
+    if "bitcoin" in low or "btc" in low:
+        return "비트코인 상단 테스트"
+    if "gold" in low:
+        return "금 선호 확대"
+    if "trump" in low:
+        return "트럼프 변수 확대"
+    if "fed" in low or "rate" in low or "cpi" in low:
+        return "금리 방향 베팅"
+    if "ceasefire" in low:
+        return "휴전 베팅 확대"
+    if "hormuz" in low:
+        return "호르무즈 변수"
+    if low.startswith("will "):
+        return "해외 베팅 이슈"
+    return t
+
+
+def _translate_label(page_type: str, text: str) -> str:
+    t = _normalize_ws(text)
+    if page_type == "poly":
+        return _translate_poly_label(t)
+
+    low = t.lower()
+    if "oil" in low or "wti" in low or "crude" in low or "brent" in low:
+        return "유가 상방 압력"
+    if "usd" in low or "fx" in low or "dollar" in low:
+        return "환율 변동성 확대"
+    if "bitcoin" in low or "btc" in low:
+        return "비트코인 강세 유지"
+    if "gold" in low:
+        return "금 선호 강화"
+    if "rate" in low or "fed" in low or "cpi" in low or "yield" in low:
+        return "금리 부담 확대"
+    return t
+
+
+def _delta_display(delta: Optional[int]):
+    if delta is None:
+        return "0%", FLAT_COLOR
+    try:
+        d = int(delta)
+    except Exception:
+        d = 0
+    if d > 0:
+        return f"▲{abs(d)}%", UP_COLOR
+    if d < 0:
+        return f"▼{abs(d)}%", DOWN_COLOR
+    return "0%", FLAT_COLOR
 
 
 def draw_card(page_type: str, items: List[Dict], out_path: str, generated_at_text: Optional[str] = None) -> str:
@@ -166,20 +187,20 @@ def draw_card(page_type: str, items: List[Dict], out_path: str, generated_at_tex
     draw.text(((WIDTH - sub_w) // 2, 234), subtitle, fill=SUB_TEXT_COLOR, font=sub_font)
 
     underline_w = 110
-    draw.rounded_rectangle(((WIDTH - underline_w) // 2, 290, (WIDTH + underline_w) // 2, 294), radius=2, fill=accent)
+    draw.rounded_rectangle(((WIDTH - underline_w) // 2, 290, (WIDTH + underline_w) // 2, 298), radius=4, fill=accent)
 
     start_y = 360
     row_gap = 175
     label_x = 150
     bar_x = 150
     bar_w = 840
-    bar_h = 16
+    bar_h = 18
 
     cleaned: List[Dict] = []
     seen = set()
     for i, item in enumerate(items[:10], start=1):
         raw_label = str((item or {}).get("label") or (item or {}).get("title") or f"항목 {i}").strip()
-        label = _translate_label(raw_label)
+        label = _translate_label(page_type, raw_label)
         if not label or label in seen:
             continue
         seen.add(label)
@@ -195,15 +216,13 @@ def draw_card(page_type: str, items: List[Dict], out_path: str, generated_at_tex
             break
 
     while len(cleaned) < 5:
-        cleaned.append({"label": f"항목 {len(cleaned) + 1}", "score": 0, "delta": None, "meta": None})
+        cleaned.append({"label": f"항목 {len(cleaned) + 1}", "score": 0, "delta": 0, "meta": None})
 
     for idx, item in enumerate(cleaned, start=1):
         y = start_y + (idx - 1) * row_gap
-        rank_text = f"{idx:02d}"
-        draw.text((60, y + 6), rank_text, fill=SUB_TEXT_COLOR, font=rank_font)
+        draw.text((60, y + 6), f"{idx:02d}", fill=SUB_TEXT_COLOR, font=rank_font)
 
-        label_max_w = 620 if idx == 1 else 640
-        label = _trim_text(draw, item["label"], item_font, label_max_w)
+        label = _trim_text(draw, item["label"], item_font, 620)
         draw.text((label_x, y), label, fill=TEXT_COLOR, font=item_font)
 
         score_text = f"{item['score']}%"
@@ -211,15 +230,13 @@ def draw_card(page_type: str, items: List[Dict], out_path: str, generated_at_tex
         score_x = WIDTH - 60 - score_w
         draw.text((score_x, y - 2), score_text, fill=accent, font=score_font)
 
+        delta_text, delta_color = _delta_display(item.get("delta"))
+        delta_w = _text_width(draw, delta_text, meta_font)
         meta = "중요도"
         meta_w = _text_width(draw, meta, meta_font)
-        draw.text((score_x - meta_w + 6, y - 28), meta, fill=SUB_TEXT_COLOR, font=meta_font)
 
-        delta_text = _delta_text(item.get("delta"))
-        if delta_text:
-            delta_fill = (93, 214, 174) if delta_text.startswith("▲") else (255, 120, 120) if delta_text.startswith("▼") else SUB_TEXT_COLOR
-            delta_w = _text_width(draw, delta_text, meta_font)
-            draw.text((score_x - delta_w - 14, y + 9), delta_text, fill=delta_fill, font=meta_font)
+        draw.text((score_x - meta_w, y - 18), meta, fill=SUB_TEXT_COLOR, font=meta_font)
+        draw.text((score_x - delta_w - 16, y + 10), delta_text, fill=delta_color, font=meta_font)
 
         _draw_bar(draw, bar_x, y + 78, bar_w, bar_h, item["score"], accent)
 
