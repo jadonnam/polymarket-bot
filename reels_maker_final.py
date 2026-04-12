@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 import base64
@@ -43,53 +44,40 @@ def _set_audio(clip, audio):
     return clip.set_audio(audio)
 
 
-def _cover_crop(img: Image.Image, target_w: int = W, target_h: int = H) -> Image.Image:
-    img = img.convert("RGB")
-    src_w, src_h = img.size
-    ratio = max(target_w / src_w, target_h / src_h)
-    new_size = (max(1, int(src_w * ratio)), max(1, int(src_h * ratio)))
-    img = img.resize(new_size, Image.LANCZOS)
-    left = max(0, (img.width - target_w) // 2)
-    top = max(0, (img.height - target_h) // 2)
-    return img.crop((left, top, left + target_w, top + target_h))
+def _gradient_bg(top=(16, 28, 42), bottom=(44, 82, 140)):
+    img = Image.new("RGB", (W, H), top)
+    px = img.load()
+    for y in range(H):
+        t = y / max(1, H - 1)
+        r = int(top[0] * (1 - t) + bottom[0] * t)
+        g = int(top[1] * (1 - t) + bottom[1] * t)
+        b = int(top[2] * (1 - t) + bottom[2] * t)
+        for x in range(W):
+            px[x, y] = (r, g, b)
+    return img
 
 
-def _wrap_text(draw, text, font, max_width, max_lines=2):
-    text = str(text or "").strip()
+def _wrap_kor(draw, text, font, max_width):
+    text = str(text or "").replace("  ", " ").strip()
     if not text:
         return [""]
-
     words = text.split()
-    if len(words) == 1 and len(text) > 12:
-        # Korean-ish fallback by char chunks
-        chars = list(text)
-        lines, cur = [], chars[0]
-        for ch in chars[1:]:
-            test = cur + ch
-            if draw.textbbox((0, 0), test, font=font)[2] <= max_width:
-                cur = test
-            else:
-                lines.append(cur)
-                cur = ch
-                if len(lines) == max_lines - 1:
-                    break
-        if len(lines) < max_lines and cur:
-            lines.append(cur)
-        return lines[:max_lines]
-
-    lines, cur = [], words[0]
-    for w in words[1:]:
-        test = cur + " " + w
+    lines, cur = [], ""
+    for word in words:
+        test = f"{cur} {word}".strip()
         if draw.textbbox((0, 0), test, font=font)[2] <= max_width:
             cur = test
         else:
-            lines.append(cur)
-            cur = w
-            if len(lines) == max_lines - 1:
-                break
-    if len(lines) < max_lines and cur:
+            if cur:
+                lines.append(cur)
+            cur = word
+    if cur:
         lines.append(cur)
-    return lines[:max_lines]
+    if len(lines) <= 2:
+        return lines
+    first = lines[0]
+    second = " ".join(lines[1:])
+    return [first, second]
 
 
 def _topic_keyword(text: str) -> str:
@@ -104,39 +92,53 @@ def _topic_keyword(text: str) -> str:
         return "rates"
     if any(k in t for k in ["중동", "전쟁", "휴전", "war", "iran", "israel", "attack", "missile", "공습", "이란", "이스라엘"]):
         return "geopolitics"
+    if any(k in t for k in ["금", "gold", "safe haven", "안전자산"]):
+        return "gold"
     return "market"
 
 
 def _topic_prompt_variants(hook_text: str):
     key = _topic_keyword(hook_text)
     common = (
-        "Editorial news photography, photorealistic, realistic lighting, no text, no watermark, no ui, "
-        "clean upper half for headline, sharp subject, premium news magazine style, visible subject, readable background."
+        "Bright editorial financial photography, realistic, premium news magazine aesthetic, "
+        "clear subject visibility, balanced exposure, no text, no watermark, no UI, vertical 9:16, "
+        "human-shot photo feel, upper area left clean enough for headline."
     )
     if key == "oil":
         return [
-            f"Large oil tanker near a brightly lit refinery at blue hour, clear industrial lights, visible ship details, dramatic but readable scene. {common}",
-            f"Oil tanker on calm water with refinery lights in the background, bright blue evening sky, realistic editorial photo. {common}",
+            f"Large oil tanker at blue hour near bright refinery coastline, realistic, clear and visible ship, premium editorial energy market photo. {common}",
+            f"Oil tanker moving on calm sea with refinery lights in background, bright blue evening sky, clear subject, realistic Reuters style. {common}",
         ]
     if key == "fx":
         return [
-            f"Modern trading desk with currency screens, blue ambient light, bright readable details, premium finance editorial photo. {common}",
-            f"Financial district skyline and currency screens, modern blue tone, clear readable composition. {common}",
+            f"Bright financial trading desk with currency screens and city lights, realistic, clean exposure, premium finance editorial photo. {common}",
+            f"Modern foreign exchange trading environment with glowing USD and KRW market screens, balanced lighting, realistic. {common}",
         ]
     if key == "bitcoin":
         return [
-            f"Modern crypto trading setup with bright monitor glow, realistic desk and chart screens, premium editorial photo. {common}",
-            f"Bitcoin trading environment, clean cinematic blue light, readable subject, realistic photo. {common}",
+            f"Modern crypto trading room with visible monitors and blue light, realistic, clean exposure, premium editorial photo. {common}",
+            f"Professional trader desk with bitcoin charts, bright but moody finance newsroom style, realistic. {common}",
         ]
     if key == "rates":
         return [
-            f"Central bank style building at dusk with bright sky and architectural lighting, realistic editorial photograph. {common}",
-            f"Financial institution exterior at evening blue hour, visible building details, premium news photo. {common}",
+            f"Central bank or government finance building at dusk with balanced light, realistic, premium editorial style. {common}",
+            f"Financial district building exterior at blue hour, clear details, realistic monetary policy news photo. {common}",
         ]
     return [
-        f"Global market news visual, premium editorial photography, bright blue hour lighting, readable subject and background. {common}",
-        f"World economy news mood, modern realistic photo, clean composition, blue and white tones, visible subject. {common}",
+        f"Premium global market editorial photo at blue hour, balanced exposure, realistic finance news atmosphere. {common}",
+        f"Professional economy news background image, realistic, clear subject, bright blue evening tones. {common}",
     ]
+
+
+def _cover_crop(img: Image.Image, target_w: int = W, target_h: int = H) -> Image.Image:
+    img = img.convert("RGB")
+    src_w, src_h = img.size
+    ratio = max(target_w / src_w, target_h / src_h)
+    new_size = (max(1, int(src_w * ratio)), max(1, int(src_h * ratio)))
+    img = img.resize(new_size, Image.LANCZOS)
+    left = max(0, (img.width - target_w) // 2)
+    top = max(0, (img.height - target_h) // 2)
+    return img.crop((left, top, left + target_w, top + target_h))
 
 
 def _generate_openai_bg(prompt_variants, out_path: str) -> bool:
@@ -146,10 +148,13 @@ def _generate_openai_bg(prompt_variants, out_path: str) -> bool:
     try:
         from openai import OpenAI
         client = OpenAI(api_key=api_key)
-    except Exception:
+    except Exception as e:
+        print(f"[이미지 클라이언트 실패] {repr(e)}")
         return False
+
+    models = [("gpt-image-1", "1024x1536"), ("dall-e-3", "1024x1792")]
     for prompt in prompt_variants:
-        for model, size in [("gpt-image-1", "1024x1536"), ("dall-e-3", "1024x1792")]:
+        for model, size in models:
             try:
                 result = client.images.generate(model=model, prompt=prompt, size=size)
                 data = result.data[0]
@@ -161,8 +166,8 @@ def _generate_openai_bg(prompt_variants, out_path: str) -> bool:
                     continue
                 img = Image.open(BytesIO(raw)).convert("RGB")
                 img = _cover_crop(img)
-                img = ImageEnhance.Brightness(img).enhance(1.22)
-                img = ImageEnhance.Contrast(img).enhance(1.06)
+                img = ImageEnhance.Brightness(img).enhance(1.32)
+                img = ImageEnhance.Contrast(img).enhance(1.08)
                 img.save(out_path, quality=95)
                 return True
             except Exception:
@@ -171,74 +176,85 @@ def _generate_openai_bg(prompt_variants, out_path: str) -> bool:
 
 
 def _draw_topic_fallback(hook_text: str, out_path: str) -> None:
-    img = Image.new("RGB", (W, H), (18, 28, 44))
-    draw = ImageDraw.Draw(img)
-    draw.rectangle((0, 0, W, H), fill=(22, 38, 66))
-    draw.ellipse((-120, 780, 620, 1500), fill=(50, 90, 140))
-    draw.ellipse((520, 620, 1260, 1440), fill=(240, 162, 72))
-    img = img.filter(ImageFilter.GaussianBlur(22))
-    img = ImageEnhance.Brightness(img).enhance(1.08)
+    img = _gradient_bg().convert("RGB")
     img.save(out_path, quality=95)
-
-
-def _draw_center_text(img, text: str, subtitle: str, y_start: int):
-    draw = ImageDraw.Draw(img)
-    title_font = _font(92, True)
-    sub_font = _font(34, False)
-    brand_font = _font(24, False)
-
-    draw.text((46, 54), "JADONNAM", fill=(185, 190, 198), font=brand_font)
-
-    lines = _wrap_text(draw, text, title_font, 920, max_lines=2)
-    y = y_start
-    for line in lines:
-        w = draw.textbbox((0, 0), line, font=title_font)[2]
-        x = (W - w) // 2
-        draw.text((x + 2, y + 3), line, fill=(0, 0, 0), font=title_font)
-        draw.text((x, y), line, fill=(244, 246, 248), font=title_font)
-        y += 102
-
-    sw = draw.textbbox((0, 0), subtitle, font=sub_font)[2]
-    sx = (W - sw) // 2
-    draw.text((sx + 1, y + 8), subtitle, fill=(0, 0, 0), font=sub_font)
-    draw.text((sx, y + 6), subtitle, fill=(198, 202, 210), font=sub_font)
 
 
 def _intro_image(text: str, subtitle: str, out_path: str, bg_path: Optional[str] = None):
     if bg_path and os.path.exists(bg_path):
         img = Image.open(bg_path).convert("RGB").resize((W, H), Image.LANCZOS)
+        img = ImageEnhance.Brightness(img).enhance(1.20)
     else:
-        img = Image.new("RGB", (W, H), (24, 44, 70))
-    img = ImageEnhance.Brightness(img).enhance(1.14)
-    img = ImageEnhance.Contrast(img).enhance(1.04)
-    _draw_center_text(img, text, subtitle, 420)
+        img = _gradient_bg()
+
+    # subtle top darkening only
+    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    od = ImageDraw.Draw(overlay)
+    od.rectangle((0, 0, W, 720), fill=(0, 0, 0, 24))
+    img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
+
+    draw = ImageDraw.Draw(img)
+    title_font = _font(94, True)
+    sub_font = _font(34, False)
+    brand_font = _font(22, False)
+
+    draw.text((48, 58), "JADONNAM", fill=(210, 214, 224), font=brand_font)
+
+    lines = _wrap_kor(draw, text, title_font, 910)
+    y = 430
+    for line in lines:
+        w = draw.textbbox((0, 0), line, font=title_font)[2]
+        x = (W - w) // 2
+        draw.text((x + 3, y + 4), line, fill=(0, 0, 0, 120), font=title_font)
+        draw.text((x, y), line, fill=(247, 248, 250), font=title_font)
+        y += 112
+
+    sw = draw.textbbox((0, 0), subtitle, font=sub_font)[2]
+    draw.text(((W - sw) // 2, y + 10), subtitle, fill=(220, 224, 230), font=sub_font)
     img.save(out_path, quality=95)
 
 
 def _outro_image(text: str, subtitle: str, out_path: str, bg_path: Optional[str] = None):
     if bg_path and os.path.exists(bg_path):
         img = Image.open(bg_path).convert("RGB").resize((W, H), Image.LANCZOS)
+        img = ImageEnhance.Brightness(img).enhance(1.08)
     else:
-        img = Image.new("RGB", (W, H), (24, 44, 70))
-    img = ImageEnhance.Brightness(img).enhance(1.1)
-    img = ImageEnhance.Contrast(img).enhance(1.02)
-    _draw_center_text(img, text, subtitle, 1180)
+        img = _gradient_bg()
+
+    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    od = ImageDraw.Draw(overlay)
+    od.rectangle((0, 900, W, H), fill=(0, 0, 0, 40))
+    img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
+
+    draw = ImageDraw.Draw(img)
+    title_font = _font(74, True)
+    sub_font = _font(32, False)
+
+    lines = _wrap_kor(draw, text, title_font, 900)
+    y = 1180
+    for line in lines:
+        w = draw.textbbox((0, 0), line, font=title_font)[2]
+        x = (W - w) // 2
+        draw.text((x + 3, y + 4), line, fill=(0, 0, 0, 110), font=title_font)
+        draw.text((x, y), line, fill=(247, 248, 250), font=title_font)
+        y += 90
+
+    sw = draw.textbbox((0, 0), subtitle, font=sub_font)[2]
+    draw.text(((W - sw) // 2, y + 14), subtitle, fill=(224, 228, 234), font=sub_font)
     img.save(out_path, quality=95)
 
 
 def _fit_card_no_zoom(src_path: str, out_path: str) -> str:
     card = Image.open(src_path).convert("RGB")
     canvas = Image.new("RGB", (W, H), (0, 0, 0))
-    max_w, max_h = 1000, 1660
+    max_w, max_h = 1000, 1540
     ratio = min(max_w / card.width, max_h / card.height)
     new_w = int(card.width * ratio)
     new_h = int(card.height * ratio)
     card = card.resize((new_w, new_h), Image.LANCZOS)
-    mask = Image.new("L", card.size, 0)
-    ImageDraw.Draw(mask).rounded_rectangle((0, 0, new_w, new_h), radius=18, fill=255)
-    x = (W - new_w) // 2
-    y = (H - new_h) // 2
-    canvas.paste(card, (x, y), mask)
+    card_x = (W - new_w) // 2
+    card_y = (H - new_h) // 2
+    canvas.paste(card, (card_x, card_y))
     canvas.save(out_path, quality=95)
     return out_path
 
@@ -253,8 +269,10 @@ def _build_synth_audio(duration: float):
     def make_frame(t):
         tt = np.asarray(t)
         base = 0.01 * np.sin(2 * np.pi * 102 * tt)
-        bass = 0.02 * np.sin(2 * np.pi * 56 * tt)
-        val = np.clip(base + bass, -0.18, 0.18)
+        bass = 0.028 * np.sin(2 * np.pi * 56 * tt) * (0.7 + 0.3 * np.sin(2 * np.pi * 0.5 * tt))
+        hats = 0.014 * np.sin(2 * np.pi * 860 * tt) * (np.mod(tt, 0.5) < 0.05)
+        click = 0.030 * np.sin(2 * np.pi * 1240 * tt) * (np.mod(tt, 1.0) < 0.06)
+        val = np.clip(base + bass + hats + click, -0.22, 0.22)
         if np.ndim(val) == 0:
             return [float(val), float(val)]
         return np.column_stack([val, val])
@@ -278,8 +296,8 @@ def _build_audio(duration: float):
             except Exception:
                 from moviepy import concatenate_audioclips
             return concatenate_audioclips(loops)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[외부 배경음 로드 실패] {repr(e)}")
     return _build_synth_audio(duration)
 
 
@@ -304,14 +322,14 @@ def build_reel(
         _draw_topic_fallback(hook_text, intro_bg)
 
     _intro_image(hook_text, "오늘 돈 흐름 정리", intro, bg_path=intro_bg)
-    _outro_image("저장해두면 다음 흐름 비교가 쉽다", "팔로우하면 매일 업데이트", outro, bg_path=intro_bg)
+    _outro_image("저장해두면 다음 흐름 비교가 쉬워진다", "팔로우하면 매일 업데이트", outro, bg_path=intro_bg)
 
     _fit_card_no_zoom(news_path, news_frame)
     _fit_card_no_zoom(poly_path, poly_frame)
     _fit_card_no_zoom(market_path, market_frame)
 
     clips = [
-        _prep(intro, 2.5),
+        _prep(intro, 2.4),
         _prep(news_frame, 3.0),
         _prep(poly_frame, 3.0),
         _prep(market_frame, 3.0),
