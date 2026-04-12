@@ -1,6 +1,8 @@
+
 from __future__ import annotations
 
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
@@ -9,15 +11,14 @@ from PIL import Image, ImageDraw, ImageFont
 WIDTH = 1080
 HEIGHT = 1350
 BG_COLOR = (0, 0, 0)
-TEXT_COLOR = (245, 247, 250)
-SUB_TEXT_COLOR = (136, 142, 156)
-BAR_BG = (42, 48, 66)
-ACCENT_NEWS = (220, 224, 233)
-ACCENT_POLY = (247, 176, 78)
-ACCENT_MARKET = (90, 214, 205)
-UP_COLOR = (88, 214, 141)
-DOWN_COLOR = (255, 107, 107)
-FLAT_COLOR = (155, 161, 175)
+TEXT_COLOR = (242, 244, 247)
+SUB_TEXT_COLOR = (132, 138, 150)
+BAR_BG = (44, 50, 66)
+
+ACCENT_NEWS = (214, 221, 232)
+ACCENT_POLY = (247, 175, 74)
+ACCENT_MARKET = (88, 202, 182)
+
 FONT_DIR = "fonts"
 
 
@@ -46,7 +47,7 @@ def _safe_score(v) -> int:
 
 
 def _text_width(draw, text, font) -> int:
-    box = draw.textbbox((0, 0), str(text), font=font)
+    box = draw.textbbox((0, 0), text, font=font)
     return box[2] - box[0]
 
 
@@ -63,28 +64,6 @@ def _trim_text(draw, text, font, max_width: int) -> str:
     return "…"
 
 
-def _normalize_label(label: str) -> str:
-    t = str(label).strip()
-    low = t.lower()
-    mapping = [
-        (["us x iran meet", "us iran meet", "u.s. x iran", "us-iran"], "미국-이란 회담 변수"),
-        (["military action"], "군사 행동 가능성"),
-        (["will sevilla fc"], "세비야 경기 베팅"),
-        (["mcsharry"], "금리 완화 기대"),
-        (["bitcoin"], "비트코인 강세 유지"),
-        (["usd", "fx", "won", "dollar"], "환율 변동성 확대"),
-        (["oil", "wti", "crude", "brent"], "유가 상방 압력"),
-        (["gold"], "금 선호 강화"),
-        (["trump"], "트럼프 변수 확대"),
-        (["hormuz"], "호르무즈 변수 확대"),
-        (["ceasefire"], "휴전 기대 확대"),
-    ]
-    for keys, out in mapping:
-        if any(k in low for k in keys):
-            return out
-    return t
-
-
 def _draw_bar(draw, x: int, y: int, width: int, height: int, score: int, fill_color) -> None:
     radius = height // 2
     draw.rounded_rectangle((x, y, x + width, y + height), radius=radius, fill=BAR_BG)
@@ -93,7 +72,7 @@ def _draw_bar(draw, x: int, y: int, width: int, height: int, score: int, fill_co
         draw.rounded_rectangle((x, y, x + fill_w, y + height), radius=radius, fill=fill_color)
 
 
-def _page_style(page_type: str):
+def _page_style(page_type: str) -> Dict[str, object]:
     if page_type == "news":
         return {"title": "뉴스", "subtitle": "지난 구간 핵심 이슈", "accent": ACCENT_NEWS, "footer": "NEWS"}
     if page_type == "poly":
@@ -101,14 +80,63 @@ def _page_style(page_type: str):
     return {"title": "시장 반응", "subtitle": "가격이 먼저 움직인 구간", "accent": ACCENT_MARKET, "footer": "MARKET"}
 
 
-def _delta_components(delta: Optional[int]):
+def _delta_text(delta: Optional[int]) -> str:
     if delta is None:
-        return ("", FLAT_COLOR)
+        return ""
     if delta > 0:
-        return (f"▲{delta}%", UP_COLOR)
+        return f"▲{abs(delta)}%"
     if delta < 0:
-        return (f"▼{abs(delta)}%", DOWN_COLOR)
-    return ("0%", FLAT_COLOR)
+        return f"▼{abs(delta)}%"
+    return "0%"
+
+
+def _translate_label(label: str) -> str:
+    s = re.sub(r"\s+", " ", str(label).strip())
+    low = s.lower()
+
+    mapping = [
+        ("us x iran meetin", "미국-이란 회담 변수"),
+        ("us x iran", "미국-이란 회담 변수"),
+        ("military action", "군사 행동 가능성"),
+        ("will sevilla fc", "세비야 경기 베팅"),
+        ("sevilla fc", "세비야 경기 베팅"),
+        ("trump", "트럼프 변수 확대"),
+        ("oil hits $100", "유가 100달러 베팅"),
+        ("oil hit $100", "유가 100달러 베팅"),
+        ("ceasefire", "휴전 가능성 확대"),
+        ("bitcoin", "비트코인 강세 유지"),
+        ("btc", "비트코인 강세 유지"),
+        ("ethereum", "이더 강세 유지"),
+        ("eth", "이더 강세 유지"),
+        ("hormuz", "호르무즈 변수 확대"),
+        ("gold", "금 선호 강화"),
+        ("fed", "연준 변수 확대"),
+        ("cpi", "물가 변수 확대"),
+        ("usd", "달러 강세 변수"),
+    ]
+    for k, v in mapping:
+        if k in low:
+            return v
+
+    # question-like cleanup
+    s = s.replace("Will ", "").replace("will ", "")
+    s = s.replace("?", "").strip()
+    if len(s) > 0 and re.search(r"[A-Za-z]", s):
+        return _clean_english_like(s)
+    return s
+
+
+def _clean_english_like(s: str) -> str:
+    low = s.lower()
+    if "iran" in low and "meeting" in low:
+        return "미국-이란 회담 변수"
+    if "military" in low:
+        return "군사 행동 가능성"
+    if "rate cut" in low:
+        return "금리 인하 기대"
+    if "tariff" in low:
+        return "관세 변수 확대"
+    return s[:14]
 
 
 def draw_card(page_type: str, items: List[Dict], out_path: str, generated_at_text: Optional[str] = None) -> str:
@@ -117,76 +145,91 @@ def draw_card(page_type: str, items: List[Dict], out_path: str, generated_at_tex
     draw = ImageDraw.Draw(img)
 
     brand_font = get_font(22, bold=False)
-    title_font = get_font(88, bold=True)
+    title_font = get_font(84, bold=True)
     sub_font = get_font(28, bold=False)
-    item_font = get_font(52, bold=True)
-    rank_font = get_font(30, bold=True)
-    score_font = get_font(44, bold=True)
-    meta_font = get_font(23, bold=False)
+    item_font = get_font(48, bold=True)
+    rank_font = get_font(28, bold=True)
+    score_font = get_font(42, bold=True)
+    meta_font = get_font(24, bold=False)
     foot_font = get_font(18, bold=False)
 
-    draw.text((40, 56), "JADONNAM", fill=SUB_TEXT_COLOR, font=brand_font)
+    draw.text((60, 52), "JADONNAM", fill=SUB_TEXT_COLOR, font=brand_font)
+
     title = style["title"]
     subtitle = style["subtitle"]
     accent = style["accent"]
+
     title_w = _text_width(draw, title, title_font)
-    draw.text(((WIDTH - title_w) // 2, 126), title, fill=TEXT_COLOR, font=title_font)
+    draw.text(((WIDTH - title_w) // 2, 132), title, fill=TEXT_COLOR, font=title_font)
+
     sub_w = _text_width(draw, subtitle, sub_font)
-    draw.text(((WIDTH - sub_w) // 2, 238), subtitle, fill=SUB_TEXT_COLOR, font=sub_font)
-    draw.rounded_rectangle(((WIDTH - 120) // 2, 294, (WIDTH + 120) // 2, 300), radius=3, fill=accent)
+    draw.text(((WIDTH - sub_w) // 2, 234), subtitle, fill=SUB_TEXT_COLOR, font=sub_font)
 
-    start_y = 362
-    row_gap = 176
-    label_x = 92
-    bar_x = 92
-    bar_w = 838
-    bar_h = 18
+    underline_w = 110
+    draw.rounded_rectangle(((WIDTH - underline_w) // 2, 290, (WIDTH + underline_w) // 2, 294), radius=2, fill=accent)
 
-    cleaned = []
+    start_y = 360
+    row_gap = 175
+    label_x = 150
+    bar_x = 150
+    bar_w = 840
+    bar_h = 16
+
+    cleaned: List[Dict] = []
     seen = set()
     for i, item in enumerate(items[:10], start=1):
         raw_label = str((item or {}).get("label") or (item or {}).get("title") or f"항목 {i}").strip()
-        label = _normalize_label(raw_label)
+        label = _translate_label(raw_label)
         if not label or label in seen:
             continue
         seen.add(label)
-        cleaned.append({
-            "label": label,
-            "score": _safe_score((item or {}).get("score", 0)),
-            "delta": (item or {}).get("delta"),
-        })
+        cleaned.append(
+            {
+                "label": label,
+                "score": _safe_score((item or {}).get("score", 0)),
+                "delta": (item or {}).get("delta"),
+                "meta": (item or {}).get("meta"),
+            }
+        )
         if len(cleaned) == 5:
             break
+
     while len(cleaned) < 5:
-        cleaned.append({"label": f"항목 {len(cleaned)+1}", "score": 0, "delta": None})
+        cleaned.append({"label": f"항목 {len(cleaned) + 1}", "score": 0, "delta": None, "meta": None})
 
     for idx, item in enumerate(cleaned, start=1):
         y = start_y + (idx - 1) * row_gap
-        draw.text((38, y + 4), f"{idx:02d}", fill=SUB_TEXT_COLOR, font=rank_font)
-        label = _trim_text(draw, item["label"], item_font, 620)
+        rank_text = f"{idx:02d}"
+        draw.text((60, y + 6), rank_text, fill=SUB_TEXT_COLOR, font=rank_font)
+
+        label_max_w = 620 if idx == 1 else 640
+        label = _trim_text(draw, item["label"], item_font, label_max_w)
         draw.text((label_x, y), label, fill=TEXT_COLOR, font=item_font)
 
         score_text = f"{item['score']}%"
         score_w = _text_width(draw, score_text, score_font)
-        score_x = WIDTH - 44 - score_w
-        draw.text((score_x, y - 4), score_text, fill=accent, font=score_font)
+        score_x = WIDTH - 60 - score_w
+        draw.text((score_x, y - 2), score_text, fill=accent, font=score_font)
 
         meta = "중요도"
         meta_w = _text_width(draw, meta, meta_font)
-        draw.text((score_x - meta_w, y - 30), meta, fill=SUB_TEXT_COLOR, font=meta_font)
+        draw.text((score_x - meta_w + 6, y - 28), meta, fill=SUB_TEXT_COLOR, font=meta_font)
 
-        delta_text, delta_color = _delta_components(item.get("delta"))
+        delta_text = _delta_text(item.get("delta"))
         if delta_text:
+            delta_fill = (93, 214, 174) if delta_text.startswith("▲") else (255, 120, 120) if delta_text.startswith("▼") else SUB_TEXT_COLOR
             delta_w = _text_width(draw, delta_text, meta_font)
-            draw.text((score_x - delta_w - 18, y + 10), delta_text, fill=delta_color, font=meta_font)
+            draw.text((score_x - delta_w - 14, y + 9), delta_text, fill=delta_fill, font=meta_font)
 
-        _draw_bar(draw, bar_x, y + 86, bar_w, bar_h, item["score"], accent)
+        _draw_bar(draw, bar_x, y + 78, bar_w, bar_h, item["score"], accent)
 
     time_text = f"기준 {generated_at_text or now_kst_text()}"
-    draw.text((40, HEIGHT - 70), time_text, fill=SUB_TEXT_COLOR, font=meta_font)
+    draw.text((60, HEIGHT - 72), time_text, fill=SUB_TEXT_COLOR, font=meta_font)
+
     footer = style["footer"]
     foot_w = _text_width(draw, footer, foot_font)
-    draw.text((WIDTH - 42 - foot_w, HEIGHT - 66), footer, fill=SUB_TEXT_COLOR, font=foot_font)
+    draw.text((WIDTH - 60 - foot_w, HEIGHT - 68), footer, fill=SUB_TEXT_COLOR, font=foot_font)
+
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     img.save(out_path, quality=95)
     return out_path
