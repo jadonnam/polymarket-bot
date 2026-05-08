@@ -6,6 +6,7 @@ from typing import Dict
 from PIL import Image, ImageDraw, ImageFont
 
 ASSET_DIR = os.path.join("assets", "logos")
+SYMBOL_DIR = os.path.join("assets", "symbols")
 
 LOGO_MAP: Dict[str, str] = {
     "AAPL": "apple.png",
@@ -44,4 +45,39 @@ def load_logo(symbol: str, size: int = 140) -> Image.Image:
     tw = d.textbbox((0, 0), txt, font=font)[2]
     th = d.textbbox((0, 0), txt, font=font)[3]
     d.text(((size - tw) // 2, (size - th) // 2), txt, fill=(236, 240, 246, 255), font=font)
+    return img
+
+
+def load_symbol_icon(name: str, size: int = 92) -> Image.Image:
+    key = str(name or "").lower().strip()
+    file_map = {
+        "us": "us.png",
+        "btc": "btc.png",
+        "etf": "etf.png",
+        "ai": "ai.png",
+        "rates": "rates.png",
+    }
+    filename = file_map.get(key, "")
+    path = os.path.join(SYMBOL_DIR, filename) if filename else ""
+    if path and os.path.exists(path):
+        img = Image.open(path).convert("RGBA")
+        return img.resize((size, size), Image.LANCZOS)
+
+    # Fallback icon badge
+    img = Image.new("RGBA", (size, size), (255, 255, 255, 0))
+    d = ImageDraw.Draw(img)
+    fill = (22, 26, 33, 235)
+    if key == "btc":
+        fill = (88, 60, 20, 235)
+    elif key == "us":
+        fill = (16, 34, 64, 235)
+    elif key == "ai":
+        fill = (20, 58, 52, 235)
+    d.rounded_rectangle((0, 0, size - 1, size - 1), radius=20, fill=fill, outline=(90, 98, 112, 255), width=2)
+    txt_map = {"us": "US", "btc": "BTC", "etf": "ETF", "ai": "AI", "rates": "RATE"}
+    txt = txt_map.get(key, key[:4].upper() or "N/A")
+    font = _font(max(16, size // 4))
+    tw = d.textbbox((0, 0), txt, font=font)[2]
+    th = d.textbbox((0, 0), txt, font=font)[3]
+    d.text(((size - tw) // 2, (size - th) // 2), txt, fill=(240, 244, 248, 255), font=font)
     return img
