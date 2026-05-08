@@ -8,6 +8,11 @@ SESSION_PATH = os.getenv("INSTAGRAM_SESSION_PATH", "instagram_session.json").str
 HASHTAGS = "#비트코인 #코인 #경제 #투자 #재테크 #주식 #환율 #금리 #돈흐름 #경제뉴스"
 
 
+def _is_login_required_error(exc: BaseException) -> bool:
+    msg = (getattr(exc, "message", None) or str(exc) or "").lower()
+    return "login_required" in msg
+
+
 def login_with_session(cl: Client):
     if not os.path.exists(SESSION_PATH):
         raise RuntimeError("instagram_session.json 없음")
@@ -62,15 +67,31 @@ def upload_reel(video_path, caption):
         login_with_session(cl)
     except Exception as e:
         print(f"[인스타 로그인 실패] {repr(e)}")
-        return
+        return None
 
-    try:
-        final_caption = caption.strip() + "\n\n" + HASHTAGS
-        print(f"[인스타 릴스 업로드] {video_path}")
-        media = cl.clip_upload(video_path, final_caption)
-        print(f"[인스타 릴스 업로드 성공] media_pk={getattr(media, 'pk', None)}")
-        cl.dump_settings(SESSION_PATH)
-        return media
-    except Exception as e:
-        print(f"[인스타 릴스 업로드 실패] {repr(e)}")
-        return
+    final_caption = caption.strip() + "\n\n" + HASHTAGS
+    print(f"[인스타 릴스 업로드] {video_path}")
+
+    media = None
+    for attempt in range(2):
+        try:
+            media = cl.clip_upload(video_path, final_caption)
+            break
+        except Exception as e:
+            print(f"[인스타 릴스 업로드 실패] {repr(e)}")
+            if attempt == 0 and _is_login_required_error(e):
+                try:
+                    print("[인스타 릴스] login_required → 재로그인 후 1회 재시도")
+                    cl.login(USERNAME, PASSWORD)
+                    cl.dump_settings(SESSION_PATH)
+                    continue
+                except Exception as e_login:
+                    print(f"[인스타 릴스 재로그인 실패] {repr(e_login)}")
+                    return None
+            return None
+
+    if media is None:
+        return None
+    print(f"[인스타 릴스 업로드 성공] media_pk={getattr(media, 'pk', None)}")
+    cl.dump_settings(SESSION_PATH)
+    return media
