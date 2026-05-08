@@ -61,6 +61,14 @@ def now_kst() -> datetime:
     return datetime.now(timezone.utc) + timedelta(hours=9)
 
 
+def selected_pipeline_name() -> str:
+    if CARD_NEWS_MODE:
+        return "card_news_v2"
+    if USE_REEL_STORY_V2:
+        return "reel_story_v2"
+    return "legacy_top5_reel"
+
+
 def generated_at_text() -> str:
     return now_kst().strftime("%Y.%m.%d %H:%M KST")
 
@@ -481,6 +489,10 @@ def attach_deltas(page_key: str, items: List[Dict[str, Any]], history: Dict[str,
 
 
 def post_regular_rank_cards() -> None:
+    print(f"[mode] CARD_NEWS_MODE={str(CARD_NEWS_MODE).lower()}")
+    print(f"[mode] USE_REEL_STORY_V2={str(USE_REEL_STORY_V2).lower()}")
+    print(f"[mode] selected pipeline={selected_pipeline_name()}")
+
     if CARD_NEWS_MODE:
         post_card_news_v2()
         return
@@ -560,6 +572,11 @@ def post_card_news_v2() -> None:
     with open(caption_path, "w", encoding="utf-8") as f:
         f.write(caption_text + "\n")
 
+    expected_files = ordered_card_paths + [reel_path, caption_path]
+    for path in expected_files:
+        exists = os.path.exists(path)
+        print(f"[card_news_v2] output check: {path} exists={exists}")
+
     if ENABLE_TELEGRAM_STORAGE:
         if send_storage_media_group is not None:
             send_storage_media_group(ordered_card_paths)
@@ -606,6 +623,12 @@ def post_breaking() -> None:
 
 def main() -> None:
     os.makedirs(OUT_DIR, exist_ok=True)
+    if CARD_NEWS_MODE:
+        os.makedirs(CARD_OUT_DIR, exist_ok=True)
+
+    print(f"[mode] CARD_NEWS_MODE={str(CARD_NEWS_MODE).lower()}")
+    print(f"[mode] USE_REEL_STORY_V2={str(USE_REEL_STORY_V2).lower()}")
+    print(f"[mode] selected pipeline={selected_pipeline_name()}")
 
     print(
         "[debug schedule]",
