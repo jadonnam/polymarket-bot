@@ -17,6 +17,7 @@ W, H = 1080, 1920
 LOGO_DIR = os.path.join("assets", "company_logos")
 PHOTO_DIR = os.path.join("assets", "company_photos")
 ENABLE_OPENAI_STATIC_IMAGE = (os.getenv("ENABLE_OPENAI_STATIC_IMAGE") or "false").lower() == "true"
+FORCE_REGENERATE_STATIC_BG = (os.getenv("FORCE_REGENERATE_STATIC_BG") or "false").lower() == "true"
 
 COMPANY_PRESET: Dict[str, Dict[str, object]] = {
     "NVDA": {
@@ -119,23 +120,39 @@ def _generate_openai_bg_cached(output_dir: str, ticker: str) -> Optional[Image.I
     # one-shot cache per ticker; if file exists, always reuse
     key = (ticker or "stock").lower()
     bg_path = os.path.join(output_dir, f"bg_{key}.jpg")
+    print(f"[static_image] ENABLE_OPENAI_STATIC_IMAGE={str(ENABLE_OPENAI_STATIC_IMAGE).lower()}")
+    print(f"[static_image] OPENAI_API_KEY exists={bool((os.getenv('OPENAI_API_KEY') or '').strip())}")
+    print(f"[static_image] bg path={bg_path}")
+
+    if FORCE_REGENERATE_STATIC_BG and os.path.exists(bg_path):
+        try:
+            os.remove(bg_path)
+            print("[static_image] force regenerate: removed cached background")
+        except Exception as e:
+            print(f"[static_image] force regenerate remove failed: {repr(e)}")
+
     if os.path.exists(bg_path):
         try:
+            print("[static_image] using=cache")
             return Image.open(bg_path).convert("RGB")
         except Exception:
             pass
 
     if not ENABLE_OPENAI_STATIC_IMAGE:
+        print("[static_image] using=fallback")
         return None
 
     api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
     if not api_key:
+        print("[static_image] using=fallback")
         return None
 
     try:
         from openai import OpenAI
         client = OpenAI(api_key=api_key)
-    except Exception:
+    except Exception as e:
+        print(f"[static_image] OpenAI failed: {repr(e)}")
+        print("[static_image] using=fallback")
         return None
 
     prompt = (
@@ -160,9 +177,13 @@ def _generate_openai_bg_cached(output_dir: str, ticker: str) -> Optional[Image.I
             img = _cover(img, W, H)
             os.makedirs(output_dir, exist_ok=True)
             img.save(bg_path, quality=95)
+            print("[static_image] OpenAI background generated")
+            print("[static_image] using=openai")
             return img
-        except Exception:
+        except Exception as e:
+            print(f"[static_image] OpenAI failed: {repr(e)}")
             continue
+    print("[static_image] using=fallback")
     return None
 
 

@@ -63,6 +63,7 @@ STATIC_REEL_MODE = (os.getenv("STATIC_REEL_MODE") or "false").lower() == "true"
 STATIC_REEL_FORMAT = (os.getenv("STATIC_REEL_FORMAT") or "stock_study").strip().lower()
 DEFAULT_STOCK_TICKER = (os.getenv("DEFAULT_STOCK_TICKER") or "NVDA").strip().upper()
 ENABLE_OPENAI_STATIC_IMAGE = (os.getenv("ENABLE_OPENAI_STATIC_IMAGE") or "false").lower() == "true"
+FORCE_REGENERATE_STATIC_BG = (os.getenv("FORCE_REGENERATE_STATIC_BG") or "false").lower() == "true"
 
 # 스레드 중간 포스팅 시간 (KST 시간 기준)
 THREADS_MIDDAY_HOURS = [9, 13, 17, 21]
@@ -818,6 +819,7 @@ def main() -> None:
     print(f"[mode] STATIC_REEL_FORMAT={STATIC_REEL_FORMAT}")
     print(f"[mode] DEFAULT_STOCK_TICKER={DEFAULT_STOCK_TICKER}")
     print(f"[mode] ENABLE_OPENAI_STATIC_IMAGE={str(ENABLE_OPENAI_STATIC_IMAGE).lower()}")
+    print(f"[mode] FORCE_REGENERATE_STATIC_BG={str(FORCE_REGENERATE_STATIC_BG).lower()}")
     print(f"[mode] resolved content mode={resolve_content_mode()}")
     print(f"[mode] selected pipeline={selected_pipeline_name()}")
 
