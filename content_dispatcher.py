@@ -94,6 +94,20 @@ def send_storage_video(path: str, caption: str = "") -> None:
     res.raise_for_status()
 
 
+def send_storage_message(text: str) -> None:
+    _check_storage()
+    if DRY_RUN:
+        print("[DRY_RUN] send_storage_message")
+        print(str(text)[:500])
+        return
+    res = requests.post(
+        _url("sendMessage"),
+        data={"chat_id": STORAGE_CHAT_ID, "text": text, "disable_web_page_preview": "true"},
+        timeout=30,
+    )
+    res.raise_for_status()
+
+
 def send_media_group(paths: Iterable[str]) -> None:
     # Legacy information-channel sender (unused in main_instagram.py)
     _check()
@@ -111,6 +125,34 @@ def send_media_group(paths: Iterable[str]) -> None:
         res = requests.post(
             _url("sendMediaGroup"),
             data={"chat_id": CHAT_ID, "media": json.dumps(media, ensure_ascii=False)},
+            files=files,
+            timeout=180,
+        )
+        res.raise_for_status()
+    finally:
+        for f in files.values():
+            try:
+                f.close()
+            except Exception:
+                pass
+
+
+def send_storage_media_group(paths: Iterable[str]) -> None:
+    _check_storage()
+    paths = list(paths)
+    if DRY_RUN:
+        print("[DRY_RUN] send_storage_media_group:", paths)
+        return
+    files = {}
+    media = []
+    try:
+        for idx, path in enumerate(paths):
+            key = f"file{idx}"
+            files[key] = open(path, "rb")
+            media.append({"type": "photo", "media": f"attach://{key}"})
+        res = requests.post(
+            _url("sendMediaGroup"),
+            data={"chat_id": STORAGE_CHAT_ID, "media": json.dumps(media, ensure_ascii=False)},
             files=files,
             timeout=180,
         )

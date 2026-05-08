@@ -7,16 +7,21 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 import news as news_module
+from card_news_v2 import build_card_news_v2
 from card_v3 import create_breaking_image
+from editorial_renderer import render_card_news_v2
 from rank_card_v3 import create_rank_set
+from reel_pack_v2 import build_reel_pack_v2
 from reels_maker_final import build_reel
 from reels_packager import build_content_pack
 from reel_story_v2 import build_reel_story_v2
 from renderer_v2 import render_reel_story_v2
 
 try:
-    from content_dispatcher import send_storage_video
+    from content_dispatcher import send_storage_media_group, send_storage_message, send_storage_video
 except Exception:
+    send_storage_media_group = None
+    send_storage_message = None
     send_storage_video = None
 
 try:
@@ -33,6 +38,7 @@ BREAKING_STATE_FILE = "breaking_state.json"
 SCORE_HISTORY_FILE = "score_history.json"
 THREADS_MIDDAY_STATE_FILE = "threads_midday_state.json"
 OUT_DIR = "output_rank"
+CARD_OUT_DIR = "output_cardnews"
 
 REGULAR_POST_MINUTE_WINDOW = int((os.getenv("REGULAR_POST_MINUTE_WINDOW") or "30").strip())
 REGULAR_MORNING_MINUTE = 8 * 60 + 10
@@ -45,6 +51,7 @@ SKIP_BREAKING_CHECK = (os.getenv("SKIP_BREAKING_CHECK") or "true").lower() == "t
 ENABLE_TELEGRAM_STORAGE = (os.getenv("ENABLE_TELEGRAM_STORAGE") or "false").lower() == "true"
 FORCE_REGULAR_NOW = (os.getenv("FORCE_REGULAR_NOW") or "false").lower() == "true"
 USE_REEL_STORY_V2 = (os.getenv("USE_REEL_STORY_V2") or "true").lower() == "true"
+CARD_NEWS_MODE = (os.getenv("CARD_NEWS_MODE") or "false").lower() == "true"
 
 # 스레드 중간 포스팅 시간 (KST 시간 기준)
 THREADS_MIDDAY_HOURS = [9, 13, 17, 21]
@@ -474,6 +481,10 @@ def attach_deltas(page_key: str, items: List[Dict[str, Any]], history: Dict[str,
 
 
 def post_regular_rank_cards() -> None:
+    if CARD_NEWS_MODE:
+        post_card_news_v2()
+        return
+
     history = load_score_history()
     news_items = attach_deltas("news", build_news_rank_items(), history)
     poly_items = attach_deltas("poly", build_poly_rank_items(), history)
@@ -513,6 +524,66 @@ def post_regular_rank_cards() -> None:
 
     mark_regular_sent()
     print("[정규 파이프라인] 릴스 생성 완료 / 텔레그램 저장 채널 전송")
+
+
+def post_card_news_v2() -> None:
+    os.makedirs(CARD_OUT_DIR, exist_ok=True)
+    raw_articles = fetch_news_articles(hours_back=24, limit=30)
+    market_items = build_market_rank_items(build_news_rank_items(), build_poly_rank_items())
+    story = build_card_news_v2(news_articles=raw_articles, market_items=market_items)
+    card_paths_raw = render_card_news_v2(story, out_dir=CARD_OUT_DIR)
+
+    ordered_card_paths: List[str] = []
+    for idx, p in enumerate(card_paths_raw[:5], start=1):
+        target = os.path.join(CARD_OUT_DIR, f"card_{idx:02d}.jpg")
+        if os.path.abspath(p) != os.path.abspath(target):
+            try:
+                import shutil
+                shutil.copyfile(p, target)
+            except Exception:
+                target = p
+        ordered_card_paths.append(target)
+
+    reel_path = build_reel_pack_v2(
+        ordered_card_paths,
+        out_path=os.path.join(CARD_OUT_DIR, "reel_output.mp4"),
+        per_card_sec=3.8,
+    )
+
+    caption_text = (
+        f"{story.get('caption', '')}\n\n"
+        f"{story.get('save_cta', '')}\n"
+        f"{story.get('share_cta', '')}\n\n"
+        f"{story.get('hashtags', '')}\n"
+    ).strip()
+    caption_path = os.path.join(CARD_OUT_DIR, "caption.txt")
+    with open(caption_path, "w", encoding="utf-8") as f:
+        f.write(caption_text + "\n")
+
+    if ENABLE_TELEGRAM_STORAGE:
+        if send_storage_media_group is not None:
+            send_storage_media_group(ordered_card_paths)
+            print("[카드뉴스 v2] 저장 채널 카드 5장 전송 완료")
+        else:
+            print("[카드뉴스 v2] send_storage_media_group 미사용(모듈 없음)")
+
+        if send_storage_video is not None:
+            send_storage_video(reel_path, caption="[카드뉴스 v2 릴스]\noutput_cardnews/reel_output.mp4")
+            print("[카드뉴스 v2] 저장 채널 릴스 전송 완료")
+        else:
+            print("[카드뉴스 v2] send_storage_video 미사용(모듈 없음)")
+
+        if send_storage_message is not None:
+            send_storage_message(f"[카드뉴스 v2 캡션]\n{caption_text}")
+            print("[카드뉴스 v2] 저장 채널 캡션 전송 완료")
+        else:
+            print("[카드뉴스 v2] send_storage_message 미사용(모듈 없음)")
+    else:
+        print("[카드뉴스 v2] ENABLE_TELEGRAM_STORAGE=false, 저장 채널 전송 생략")
+
+    # Instagram auto-upload is intentionally disabled in card-news mode.
+    print("[카드뉴스 v2] 인스타 자동업로드 비활성화")
+    mark_regular_sent()
 
 
 def _breaking_news_score(article: Dict[str, Any]) -> int:
