@@ -765,10 +765,8 @@ def post_static_reel_v1() -> None:
     )
     poster_path = result["poster_path"]
     reel_path = result["reel_path"]
-    caption_path = result["caption_path"]
-    caption_text = result["caption_text"]
 
-    for path in (poster_path, reel_path, caption_path):
+    for path in (poster_path, reel_path):
         print(f"[static_reel] output check: {path} exists={os.path.exists(path)} size={os.path.getsize(path) if os.path.exists(path) else -1}")
 
     if ENABLE_TELEGRAM_STORAGE:
@@ -782,11 +780,6 @@ def post_static_reel_v1() -> None:
             print("[static_reel] 저장 채널 reel 전송 완료")
         else:
             print("[static_reel] send_storage_video 미사용(모듈 없음)")
-        if send_storage_message is not None:
-            send_storage_message(f"[static_reel 캡션]\n{caption_text}")
-            print("[static_reel] 저장 채널 caption 전송 완료")
-        else:
-            print("[static_reel] send_storage_message 미사용(모듈 없음)")
     else:
         print("[static_reel] ENABLE_TELEGRAM_STORAGE=false, 저장 채널 전송 생략")
 

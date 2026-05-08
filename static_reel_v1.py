@@ -25,27 +25,42 @@ def _font(size: int, bold: bool = True):
 
 
 def _base() -> Image.Image:
-    img = Image.new("RGB", (W, H), (7, 9, 13))
+    return Image.new("RGB", (W, H), (6, 8, 10))
+
+
+def _ticker_box(ticker: str, size: int = 520) -> Image.Image:
+    img = Image.new("RGBA", (size, size), (255, 255, 255, 0))
     d = ImageDraw.Draw(img)
-    for y in range(H):
-        v = int(12 + 26 * (y / H))
-        d.line([(0, y), (W, y)], fill=(v, v, v + 3))
+    d.rounded_rectangle((0, 0, size - 1, size - 1), radius=36, fill=(236, 240, 245), outline=(230, 234, 238), width=2)
+    t = ticker[:6].upper() or "N/A"
+    f = _font(max(60, size // 4), True)
+    tw = d.textbbox((0, 0), t, font=f)[2]
+    th = d.textbbox((0, 0), t, font=f)[3]
+    d.text(((size - tw) // 2, (size - th) // 2), t, fill=(16, 20, 26), font=f)
     return img
 
 
 def _poster_stock_study() -> Image.Image:
     img = _base()
     d = ImageDraw.Draw(img)
-    d.text((60, 72), "매일 미국 주식 1종목 공부하기", fill=(245, 248, 251), font=_font(64, True))
-    d.text((60, 156), "오늘의 종목", fill=(192, 200, 212), font=_font(36, False))
+    d.text((70, 84), "매일 미국 주식 1종목", fill=(247, 249, 251), font=_font(84, True))
+    d.text((70, 176), "공부하기", fill=(247, 249, 251), font=_font(84, True))
 
-    logo = load_logo("NVDA", 420)
-    img.paste(logo, ((W - logo.width) // 2, 430), logo)
-    d.text((60, 1280), "NVIDIA", fill=(246, 249, 252), font=_font(128, True))
-    d.text((60, 1426), "NVDA · 빅테크 시가총액 상위", fill=(214, 221, 230), font=_font(46, True))
-    d.rounded_rectangle((60, 1580, 1020, 1700), radius=24, fill=(18, 24, 32))
-    d.text((92, 1618), "핵심 한 줄: AI 수요가 실적 가이던스를 다시 올렸다", fill=(231, 237, 244), font=_font(36, True))
-    d.text((60, 1780), "JADONNAM", fill=(176, 185, 198), font=_font(30, False))
+    ticker = "NVDA"
+    company_kr = "엔비디아"
+    logo = load_logo(ticker, 520)
+    center_x = (W - logo.width) // 2
+    center_y = 520
+    # If logo loader returns fallback badge, keep a cleaner white ticker box.
+    if logo.width < 200:
+        logo = _ticker_box(ticker, 520)
+        center_x = (W - logo.width) // 2
+    img.paste(logo, (center_x, center_y), logo)
+
+    d.text((80, 1480), "#1", fill=(245, 248, 251), font=_font(88, True))
+    d.text((80, 1590), company_kr, fill=(245, 248, 251), font=_font(96, True))
+    d.text((80, 1710), ticker, fill=(214, 221, 230), font=_font(62, True))
+    d.text((72, 1842), "@jadonnam", fill=(166, 176, 190), font=_font(30, False))
     return img
 
 
@@ -80,26 +95,6 @@ def _poster_ranking() -> Image.Image:
     return img
 
 
-def _build_caption(fmt: str) -> str:
-    if fmt == "ranking":
-        lines = [
-            "올해 반도체 수익률 상위 종목 한 번에 정리",
-            "상승률만 보지 말고 매출/마진 구조 같이 체크",
-            "실적 시즌 전 비교용으로 저장해두세요",
-            "다음 분기 발표 때 순위 변화가 핵심 포인트",
-            "#미국주식 #반도체 #수익률 #투자공부 #경제뉴스 #저장콘텐츠",
-        ]
-    else:
-        lines = [
-            "매일 미국 주식 1종목 공부하기",
-            "오늘은 NVIDIA: 실적과 가이던스가 핵심",
-            "주가보다 사업지표를 먼저 보면 흐름이 보입니다",
-            "실적 시즌 전에 다시 보기용으로 저장하세요",
-            "#미국주식 #엔비디아 #주식공부 #빅테크 #투자공부 #저장콘텐츠",
-        ]
-    return "\n".join(lines)
-
-
 def build_static_reel_v1(
     output_dir: str = "output_static_reel",
     reel_format: str = "stock_study",
@@ -112,9 +107,9 @@ def build_static_reel_v1(
 
     poster_path = os.path.join(output_dir, "poster.jpg")
     reel_path = os.path.join(output_dir, "reel_output.mp4")
-    caption_path = os.path.join(output_dir, "caption.txt")
 
-    poster = _poster_ranking() if fmt == "ranking" else _poster_stock_study()
+    # stock_study format is now fixed to static simple style.
+    poster = _poster_stock_study() if fmt == "stock_study" else _poster_ranking()
     poster.save(poster_path, quality=95)
 
     clip = ImageClip(poster_path)
@@ -124,8 +119,4 @@ def build_static_reel_v1(
         clip = clip.set_duration(duration_sec)
     clip.write_videofile(reel_path, fps=30, codec="libx264", audio=False, logger=None)
 
-    caption_text = _build_caption(fmt)
-    with open(caption_path, "w", encoding="utf-8") as f:
-        f.write(caption_text + "\n")
-
-    return {"poster_path": poster_path, "reel_path": reel_path, "caption_path": caption_path, "caption_text": caption_text}
+    return {"poster_path": poster_path, "reel_path": reel_path}
