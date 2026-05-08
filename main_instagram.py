@@ -8,16 +8,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import news as news_module
 from card_v3 import create_breaking_image
-from polymarket import get_polymarket_markets
 from rank_card_v3 import create_rank_set
 from reels_maker_final import build_reel
 from reels_packager import build_content_pack
-
-try:
-    from instagram_v2 import upload_instagram, upload_reel
-except Exception:
-    upload_instagram = None
-    upload_reel = None
 
 try:
     from content_dispatcher import send_storage_video
@@ -47,10 +40,7 @@ BREAKING_NEWS_MIN_SCORE = 108
 BREAKING_POLY_MIN_SCORE = 92
 DRY_RUN_PIPELINE = (os.getenv("DRY_RUN_PIPELINE") or "false").lower() == "true"
 SKIP_BREAKING_CHECK = (os.getenv("SKIP_BREAKING_CHECK") or "true").lower() == "true"
-SKIP_POLYMARKET = (os.getenv("SKIP_POLYMARKET") or "true").lower() == "true"
-ENABLE_INSTAGRAM_UPLOAD = (os.getenv("ENABLE_INSTAGRAM_UPLOAD") or "false").lower() == "true"
 ENABLE_TELEGRAM_STORAGE = (os.getenv("ENABLE_TELEGRAM_STORAGE") or "false").lower() == "true"
-USE_INSTAGRAM_FOR_BREAKING = (os.getenv("USE_INSTAGRAM_FOR_BREAKING") or "false").lower() == "true"
 FORCE_REGULAR_NOW = (os.getenv("FORCE_REGULAR_NOW") or "false").lower() == "true"
 
 # 스레드 중간 포스팅 시간 (KST 시간 기준)
@@ -379,52 +369,14 @@ def _poly_score(question: str, volume: Any, yes_price: Any) -> int:
 
 
 def build_poly_rank_items() -> List[Dict[str, Any]]:
-    if SKIP_POLYMARKET:
-        print("[비용절약] SKIP_POLYMARKET=true, 폴리마켓 API 호출 생략")
-        markets = []
-    else:
-        try:
-            markets = get_polymarket_markets()
-        except Exception:
-            markets = []
-    if not markets:
-        return [
-            {"label": "유가 상단 도전", "score": 83},
-            {"label": "휴전 베팅 확대", "score": 80},
-            {"label": "트럼프 변수 확대", "score": 76},
-            {"label": "호르무즈 정상화 기대", "score": 73},
-            {"label": "비트코인 상단 테스트", "score": 70},
-        ]
-    scored = []
-    seen = set()
-    for m in markets:
-        q = m.get("question", "")
-        label = _poly_label(q)
-        # 잡시장/스포츠성 베팅은 뒤로 밀거나 제외
-        base_score = _poly_score(q, m.get("volume24hr", m.get("volume", 0)), m.get("yes_price", 0))
-        if label == "해외 베팅 이슈":
-            base_score -= 25
-        if label in seen:
-            continue
-        seen.add(label)
-        scored.append({
-            "label": label,
-            "score": max(0, base_score),
-            "question": q,
-            "meta": m.get("slug", ""),
-        })
-    scored.sort(key=lambda x: x["score"], reverse=True)
-    fillers = [
+    print("[비용절약] Polymarket API 비활성화, 고정 랭크 사용")
+    return [
         {"label": "유가 상단 도전", "score": 82},
         {"label": "휴전 베팅 확대", "score": 79},
         {"label": "트럼프 변수 확대", "score": 75},
         {"label": "호르무즈 정상화 기대", "score": 72},
         {"label": "비트코인 상단 테스트", "score": 69},
     ]
-    out = [x for x in scored if x["score"] >= 30][:5]
-    while len(out) < 5:
-        out.append(fillers[len(out)])
-    return out[:5]
 
 
 def build_news_rank_items() -> List[Dict[str, Any]]:
@@ -539,30 +491,13 @@ def post_regular_rank_cards() -> None:
                 print(f"[텔레그램 저장 채널 업로드 오류] {repr(e)}")
         else:
             print("[텔레그램 저장 채널] send_storage_video 미사용(모듈 없음)")
-
-    ig_ok = False
-    # 인스타 릴스 자동업로드
-    if not ENABLE_INSTAGRAM_UPLOAD:
-        print("[인스타 업로드 비활성화] 릴스 파일만 생성됨")
-    elif upload_reel is not None:
-        try:
-            media = upload_reel(reel_path, pack["reel_caption"])
-            if media is not None:
-                ig_ok = True
-        except Exception as e:
-            print(f"[인스타 릴스 업로드 오류] {repr(e)}")
     else:
-        print("[인스타 릴스] upload_reel 미사용(모듈 없음)")
+        print("[텔레그램 저장 채널 업로드 비활성화]")
+
+    print("[인스타 업로드 비활성화] 릴스 파일만 생성됨")
 
     mark_regular_sent()
-    if ig_ok:
-        print("[정규 파이프라인] 릴스 생성 완료 / 인스타 업로드 성공")
-    elif not ENABLE_INSTAGRAM_UPLOAD:
-        print("[정규 파이프라인] 릴스 생성 완료 / 인스타 업로드 비활성화")
-    elif upload_reel is None:
-        print("[정규 파이프라인] 릴스 생성 완료 / 인스타 업로드 안 함")
-    else:
-        print("[정규 파이프라인] 릴스 생성 완료 / 인스타 업로드 실패")
+    print("[정규 파이프라인] 릴스 생성 완료 / 텔레그램 저장 채널 전송")
 
 
 def _breaking_news_score(article: Dict[str, Any]) -> int:
@@ -580,69 +515,7 @@ def _breaking_poly_score(question: str, volume: Any, yes_price: Any) -> int:
 
 
 def post_breaking() -> None:
-    print("[속보] 뉴스 검사 시작")
-    articles = fetch_breaking_news_articles(hours_back=12, limit=20)
-    best_news = None
-    for art in articles:
-        title = art.get("title", "") or ""
-        score = _breaking_news_score(art)
-        if score < BREAKING_NEWS_MIN_SCORE:
-            print("[속보] 뉴스 점수 미달:", score, title[:80])
-            continue
-        key = f"news::{title.strip()}"
-        if was_recent_breaking(key):
-            print("[속보] 뉴스 중복 스킵:", title[:80])
-            continue
-        best_news = {"title": title, "score": score, "key": key}
-        break
-
-    if best_news:
-        img_path = os.path.join(OUT_DIR, "breaking_news.jpg")
-        create_breaking_image(best_news["title"], img_path)
-        if USE_INSTAGRAM_FOR_BREAKING and upload_instagram is not None:
-            try:
-                upload_instagram(img_path, best_news["title"])
-            except Exception:
-                pass
-        mark_breaking_posted(best_news["key"], best_news["title"])
-        print("[속보 업로드 완료 - 뉴스]", best_news["title"])
-    else:
-        print("[속보] 뉴스 후보 없음")
-
-    print("[속보] 폴리 검사 시작")
-    if SKIP_POLYMARKET:
-        print("[비용절약] SKIP_POLYMARKET=true, 속보 폴리 검사 생략")
-        markets = []
-    else:
-        try:
-            markets = get_polymarket_markets()
-        except Exception:
-            markets = []
-    best_poly = None
-    for m in markets[:30]:
-        q = m.get("question", "")
-        score = _breaking_poly_score(q, m.get("volume24hr", m.get("volume", 0)), m.get("yes_price", 0))
-        if score < BREAKING_POLY_MIN_SCORE:
-            continue
-        key = f"poly::{q.strip()}"
-        if was_recent_breaking(key):
-            print("[속보] 폴리 중복 스킵:", q[:80])
-            continue
-        best_poly = {"title": q, "score": score, "key": key}
-        break
-
-    if best_poly:
-        img_path = os.path.join(OUT_DIR, "breaking_poly.jpg")
-        create_breaking_image(best_poly["title"], img_path)
-        if USE_INSTAGRAM_FOR_BREAKING and upload_instagram is not None:
-            try:
-                upload_instagram(img_path, best_poly["title"])
-            except Exception:
-                pass
-        mark_breaking_posted(best_poly["key"], best_poly["title"])
-        print("[속보 업로드 완료 - 폴리마켓]", best_poly["title"])
-    else:
-        print("[속보] 폴리 후보 없음 또는 점수 미달")
+    print("[속보] 운영 비활성화")
 
 
 def main() -> None:

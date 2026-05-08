@@ -33,6 +33,7 @@ def _check_storage() -> None:
 
 
 def send_message(text: str) -> None:
+    # Legacy information-channel sender (unused in main_instagram.py)
     _check()
     if DRY_RUN:
         print("[DRY_RUN] send_message")
@@ -47,6 +48,7 @@ def send_message(text: str) -> None:
 
 
 def send_image(path: str, caption: str = "") -> None:
+    # Legacy information-channel sender (unused in main_instagram.py)
     _check()
     if DRY_RUN:
         print(f"[DRY_RUN] send_image: {path} | {caption[:120]}")
@@ -62,6 +64,7 @@ def send_image(path: str, caption: str = "") -> None:
 
 
 def send_video(path: str, caption: str = "") -> None:
+    # Legacy information-channel sender (unused in main_instagram.py)
     _check()
     if DRY_RUN:
         print(f"[DRY_RUN] send_video: {path} | {caption[:120]}")
@@ -92,6 +95,7 @@ def send_storage_video(path: str, caption: str = "") -> None:
 
 
 def send_media_group(paths: Iterable[str]) -> None:
+    # Legacy information-channel sender (unused in main_instagram.py)
     _check()
     paths = list(paths)
     if DRY_RUN:

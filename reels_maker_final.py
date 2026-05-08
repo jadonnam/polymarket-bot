@@ -22,7 +22,6 @@ FONT_DIR = os.path.join(BASE_DIR, "fonts")
 ASSETS_AUDIO = os.path.join(BASE_DIR, "assets", "audio", "bg.mp3")
 BOLD_PATH = os.path.join(FONT_DIR, "Pretendard-Bold.ttf")
 REG_PATH = os.path.join(FONT_DIR, "Pretendard-Regular.ttf")
-ENABLE_OPENAI_IMAGE = (os.getenv("ENABLE_OPENAI_IMAGE") or "false").lower() == "true"
 
 
 def _font(size: int, bold: bool = True):
@@ -143,9 +142,6 @@ def _cover_crop(img: Image.Image, target_w: int = W, target_h: int = H) -> Image
 
 
 def _generate_openai_bg(prompt_variants, out_path: str) -> bool:
-    if not ENABLE_OPENAI_IMAGE:
-        print("[비용절약] ENABLE_OPENAI_IMAGE=false, OpenAI 이미지 생성 생략")
-        return False
     api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
     if not api_key:
         return False
@@ -322,8 +318,8 @@ def build_reel(
     market_frame = "output_rank/_reel_market_frame.jpg"
     outro = "output_rank/_reel_outro.jpg"
 
-    if not _generate_openai_bg(_topic_prompt_variants(hook_text), intro_bg):
-        _draw_topic_fallback(hook_text, intro_bg)
+    print("[비용절약] OpenAI 이미지 생성 비활성화, fallback 배경 사용")
+    _draw_topic_fallback(hook_text, intro_bg)
 
     _intro_image(hook_text, "오늘 돈 흐름 정리", intro, bg_path=intro_bg)
     _outro_image("저장해두면 다음 흐름 비교가 쉬워진다", "팔로우하면 매일 업데이트", outro, bg_path=intro_bg)
