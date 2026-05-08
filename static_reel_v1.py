@@ -16,6 +16,7 @@ except Exception:
 W, H = 1080, 1920
 LOGO_DIR = os.path.join("assets", "company_logos")
 PHOTO_DIR = os.path.join("assets", "company_photos")
+ENABLE_OPENAI_STATIC_IMAGE = (os.getenv("ENABLE_OPENAI_STATIC_IMAGE") or "false").lower() == "true"
 
 COMPANY_PRESET: Dict[str, Dict[str, object]] = {
     "NVDA": {
@@ -114,6 +115,57 @@ def _cover(img: Image.Image, w: int, h: int) -> Image.Image:
     return r.crop((l, t, l + w, t + h))
 
 
+def _generate_openai_bg_cached(output_dir: str, ticker: str) -> Optional[Image.Image]:
+    # one-shot cache per ticker; if file exists, always reuse
+    key = (ticker or "stock").lower()
+    bg_path = os.path.join(output_dir, f"bg_{key}.jpg")
+    if os.path.exists(bg_path):
+        try:
+            return Image.open(bg_path).convert("RGB")
+        except Exception:
+            pass
+
+    if not ENABLE_OPENAI_STATIC_IMAGE:
+        return None
+
+    api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
+    if not api_key:
+        return None
+
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=api_key)
+    except Exception:
+        return None
+
+    prompt = (
+        "Vertical editorial finance background photo for social media, realistic corporate technology atmosphere, "
+        "AI datacenter mood, premium business news poster style, cinematic lighting, green and black color palette, "
+        "high detail, no text, no logo, no watermark, no brand mark."
+    )
+    models = [("gpt-image-1", "1024x1536"), ("dall-e-3", "1024x1792")]
+    for model, size in models:
+        try:
+            result = client.images.generate(model=model, prompt=prompt, size=size)
+            data = result.data[0]
+            raw = None
+            if getattr(data, "b64_json", None):
+                import base64
+                raw = base64.b64decode(data.b64_json)
+            elif getattr(data, "url", None):
+                raw = requests.get(data.url, timeout=40).content
+            if not raw:
+                continue
+            img = Image.open(BytesIO(raw)).convert("RGB")
+            img = _cover(img, W, H)
+            os.makedirs(output_dir, exist_ok=True)
+            img.save(bg_path, quality=95)
+            return img
+        except Exception:
+            continue
+    return None
+
+
 def _contain_rgba(img: Image.Image, max_size: int = 560) -> Image.Image:
     rgba = img.convert("RGBA")
     ratio = min(max_size / max(1, rgba.width), max_size / max(1, rgba.height))
@@ -169,10 +221,11 @@ def _nvidia_brand_fallback() -> Image.Image:
     return img
 
 
-def _poster_stock_study(stock_ticker: str = "NVDA") -> Image.Image:
+def _poster_stock_study(stock_ticker: str = "NVDA", output_dir: str = "output_static_reel") -> Image.Image:
     ticker = (stock_ticker or "NVDA").upper().strip()
     data = _company_data(ticker)
-    bg_raw = _load_company_photo(data)
+    ai_bg = _generate_openai_bg_cached(output_dir, ticker)
+    bg_raw = ai_bg if ai_bg is not None else _load_company_photo(data)
     if bg_raw is not None:
         img = _cover(bg_raw, W, H)
     elif ticker == "NVDA":
@@ -256,7 +309,7 @@ def build_static_reel_v1(
     poster_path = os.path.join(output_dir, "poster.jpg")
     reel_path = os.path.join(output_dir, "reel_output.mp4")
 
-    poster = _poster_stock_study(stock_ticker=stock_ticker) if fmt == "stock_study" else _poster_ranking()
+    poster = _poster_stock_study(stock_ticker=stock_ticker, output_dir=output_dir) if fmt == "stock_study" else _poster_ranking()
     poster.save(poster_path, quality=95)
 
     clip = ImageClip(poster_path)
