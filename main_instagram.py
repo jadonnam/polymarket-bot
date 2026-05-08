@@ -563,11 +563,15 @@ def post_card_news_v2() -> None:
     )
 
     caption_text = (
-        f"{story.get('caption', '')}\n\n"
-        f"{story.get('save_cta', '')}\n"
-        f"{story.get('share_cta', '')}\n\n"
-        f"{story.get('hashtags', '')}\n"
-    ).strip()
+        "\n".join(story.get("caption_lines", [])).strip()
+        if story.get("caption_lines")
+        else (
+            f"{story.get('caption', '')}\n\n"
+            f"{story.get('save_cta', '')}\n"
+            f"{story.get('share_cta', '')}\n\n"
+            f"{story.get('hashtags', '')}\n"
+        ).strip()
+    )
     caption_path = os.path.join(CARD_OUT_DIR, "caption.txt")
     with open(caption_path, "w", encoding="utf-8") as f:
         f.write(caption_text + "\n")
