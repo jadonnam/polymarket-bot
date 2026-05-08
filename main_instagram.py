@@ -43,6 +43,9 @@ REGULAR_POST_MINUTE_WINDOW = 90
 BREAKING_COOLDOWN_MINUTES = 720
 BREAKING_NEWS_MIN_SCORE = 108
 BREAKING_POLY_MIN_SCORE = 92
+DRY_RUN_PIPELINE = (os.getenv("DRY_RUN_PIPELINE") or "false").lower() == "true"
+SKIP_BREAKING_CHECK = (os.getenv("SKIP_BREAKING_CHECK") or "true").lower() == "true"
+SKIP_POLYMARKET = (os.getenv("SKIP_POLYMARKET") or "true").lower() == "true"
 ENABLE_INSTAGRAM_UPLOAD = (os.getenv("ENABLE_INSTAGRAM_UPLOAD") or "false").lower() == "true"
 ENABLE_TELEGRAM_STORAGE = (os.getenv("ENABLE_TELEGRAM_STORAGE") or "false").lower() == "true"
 USE_INSTAGRAM_FOR_BREAKING = (os.getenv("USE_INSTAGRAM_FOR_BREAKING") or "false").lower() == "true"
@@ -374,10 +377,14 @@ def _poly_score(question: str, volume: Any, yes_price: Any) -> int:
 
 
 def build_poly_rank_items() -> List[Dict[str, Any]]:
-    try:
-        markets = get_polymarket_markets()
-    except Exception:
+    if SKIP_POLYMARKET:
+        print("[비용절약] SKIP_POLYMARKET=true, 폴리마켓 API 호출 생략")
         markets = []
+    else:
+        try:
+            markets = get_polymarket_markets()
+        except Exception:
+            markets = []
     if not markets:
         return [
             {"label": "유가 상단 도전", "score": 83},
@@ -601,10 +608,14 @@ def post_breaking() -> None:
         print("[속보] 뉴스 후보 없음")
 
     print("[속보] 폴리 검사 시작")
-    try:
-        markets = get_polymarket_markets()
-    except Exception:
+    if SKIP_POLYMARKET:
+        print("[비용절약] SKIP_POLYMARKET=true, 속보 폴리 검사 생략")
         markets = []
+    else:
+        try:
+            markets = get_polymarket_markets()
+        except Exception:
+            markets = []
     best_poly = None
     for m in markets[:30]:
         q = m.get("question", "")
@@ -646,10 +657,15 @@ def main() -> None:
         print("[안내] FORCE_REGULAR_NOW 테스트 후 Railway 환경변수를 false로 원복하세요")
 
     # 속보 체크
-    try:
-        post_breaking()
-    except Exception as e:
-        print("[속보 처리 오류]", repr(e))
+    if DRY_RUN_PIPELINE:
+        print("[비용절약] DRY_RUN_PIPELINE=true, 속보 검사 생략")
+    elif SKIP_BREAKING_CHECK:
+        print("[비용절약] SKIP_BREAKING_CHECK=true, 속보 검사 생략")
+    else:
+        try:
+            post_breaking()
+        except Exception as e:
+            print("[속보 처리 오류]", repr(e))
 
     # 정규 업로드 (08시 / 19시)
     try:

@@ -22,6 +22,7 @@ FONT_DIR = os.path.join(BASE_DIR, "fonts")
 ASSETS_AUDIO = os.path.join(BASE_DIR, "assets", "audio", "bg.mp3")
 BOLD_PATH = os.path.join(FONT_DIR, "Pretendard-Bold.ttf")
 REG_PATH = os.path.join(FONT_DIR, "Pretendard-Regular.ttf")
+ENABLE_OPENAI_IMAGE = (os.getenv("ENABLE_OPENAI_IMAGE") or "false").lower() == "true"
 
 
 def _font(size: int, bold: bool = True):
@@ -142,6 +143,9 @@ def _cover_crop(img: Image.Image, target_w: int = W, target_h: int = H) -> Image
 
 
 def _generate_openai_bg(prompt_variants, out_path: str) -> bool:
+    if not ENABLE_OPENAI_IMAGE:
+        print("[비용절약] ENABLE_OPENAI_IMAGE=false, OpenAI 이미지 생성 생략")
+        return False
     api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
     if not api_key:
         return False

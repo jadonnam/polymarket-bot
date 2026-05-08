@@ -11,6 +11,7 @@ import requests
 
 API_KEY = (os.getenv("NEWS_API_KEY") or "").strip()
 CACHE_FILE = "news_cache.json"
+USE_CACHED_NEWS = (os.getenv("USE_CACHED_NEWS") or "true").lower() == "true"
 
 SEARCH_QUERY = (
     '("trump" OR "tariff" OR "trade deal" OR "bitcoin" OR "btc" OR "ethereum" OR "eth" '
@@ -281,6 +282,9 @@ def score_breaking_article(article: Dict[str, Any]) -> int:
 
 def fetch_news(limit: int = 40, hours_back: int = 36) -> List[Dict[str, Any]]:
     cached = get_cached_articles(max_age_hours=6)
+    if USE_CACHED_NEWS and cached:
+        print("[비용절약] USE_CACHED_NEWS=true, 캐시 뉴스 사용")
+        return cached[:limit]
     if not API_KEY:
         return cached
 
