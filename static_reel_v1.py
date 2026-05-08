@@ -21,8 +21,9 @@ COMPANY_PRESET: Dict[str, Dict[str, object]] = {
     "NVDA": {
         "name_kr": "엔비디아",
         "name_en": "NVIDIA",
-        "logo_files": ["nvidia.png", "nvda.png"],
-        "photo_files": ["nvidia.jpg", "nvda.jpg", "jensen_huang.jpg", "datacenter.jpg", "gpu.jpg"],
+        # prefer explicit nvda assets first
+        "logo_files": ["nvda.png", "nvidia.png"],
+        "photo_files": ["nvda.jpg", "nvidia.jpg", "jensen_huang.jpg", "datacenter.jpg", "gpu.jpg"],
         "logo_urls": [
             "https://upload.wikimedia.org/wikipedia/commons/2/21/Nvidia_logo.svg",
             "https://upload.wikimedia.org/wikipedia/commons/a/a4/NVIDIA_logo.svg",
@@ -154,11 +155,30 @@ def _load_company_logo(data: Dict[str, object]) -> Optional[Image.Image]:
     return None
 
 
-def _poster_stock_study() -> Image.Image:
-    ticker = "NVDA"
+def _nvidia_brand_fallback() -> Image.Image:
+    img = _base()
+    d = ImageDraw.Draw(img)
+    # black base with Nvidia green accents + keywords
+    for y in range(H):
+        v = int(8 + 14 * (y / H))
+        d.line([(0, y), (W, y)], fill=(v, v + 2, v))
+    d.rectangle((0, 0, W, 18), fill=(118, 220, 118))
+    d.rectangle((0, H - 18, W, H), fill=(118, 220, 118))
+    d.text((70, 540), "NVIDIA", fill=(230, 245, 230), font=_font(148, True))
+    d.text((74, 702), "AI  ·  GPU  ·  DATA CENTER", fill=(138, 228, 138), font=_font(44, True))
+    return img
+
+
+def _poster_stock_study(stock_ticker: str = "NVDA") -> Image.Image:
+    ticker = (stock_ticker or "NVDA").upper().strip()
     data = _company_data(ticker)
     bg_raw = _load_company_photo(data)
-    img = _cover(bg_raw, W, H) if bg_raw is not None else _base()
+    if bg_raw is not None:
+        img = _cover(bg_raw, W, H)
+    elif ticker == "NVDA":
+        img = _nvidia_brand_fallback()
+    else:
+        img = _base()
     img = Image.blend(img, _base(), alpha=0.28)
     d = ImageDraw.Draw(img)
 
@@ -226,6 +246,7 @@ def build_static_reel_v1(
     output_dir: str = "output_static_reel",
     reel_format: str = "stock_study",
     duration_sec: float = 18.0,
+    stock_ticker: str = "NVDA",
 ) -> Dict[str, str]:
     Path(output_dir).mkdir(parents=True, exist_ok=True)
     fmt = (reel_format or "stock_study").strip().lower()
@@ -235,7 +256,7 @@ def build_static_reel_v1(
     poster_path = os.path.join(output_dir, "poster.jpg")
     reel_path = os.path.join(output_dir, "reel_output.mp4")
 
-    poster = _poster_stock_study() if fmt == "stock_study" else _poster_ranking()
+    poster = _poster_stock_study(stock_ticker=stock_ticker) if fmt == "stock_study" else _poster_ranking()
     poster.save(poster_path, quality=95)
 
     clip = ImageClip(poster_path)

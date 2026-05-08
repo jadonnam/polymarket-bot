@@ -61,6 +61,7 @@ CARD_NEWS_MODE = (os.getenv("CARD_NEWS_MODE") or "false").lower() == "true"
 CONTENT_MODE = (os.getenv("CONTENT_MODE") or "briefing").strip().lower()
 STATIC_REEL_MODE = (os.getenv("STATIC_REEL_MODE") or "false").lower() == "true"
 STATIC_REEL_FORMAT = (os.getenv("STATIC_REEL_FORMAT") or "stock_study").strip().lower()
+DEFAULT_STOCK_TICKER = (os.getenv("DEFAULT_STOCK_TICKER") or "NVDA").strip().upper()
 
 # 스레드 중간 포스팅 시간 (KST 시간 기준)
 THREADS_MIDDAY_HOURS = [9, 13, 17, 21]
@@ -762,6 +763,7 @@ def post_static_reel_v1() -> None:
         output_dir=STATIC_REEL_OUT_DIR,
         reel_format=STATIC_REEL_FORMAT,
         duration_sec=18.0,
+        stock_ticker=DEFAULT_STOCK_TICKER,
     )
     poster_path = result["poster_path"]
     reel_path = result["reel_path"]
@@ -772,7 +774,7 @@ def post_static_reel_v1() -> None:
     if ENABLE_TELEGRAM_STORAGE:
         if send_storage_video is not None:
             send_storage_video(reel_path, caption="[static_reel 영상]\noutput_static_reel/reel_output.mp4")
-            print("[static_reel] 저장 채널 reel 전송 완료")
+            print("[static_reel] 저장 채널 reel 전송 완료 (single send)")
         else:
             print("[static_reel] send_storage_video 미사용(모듈 없음)")
     else:
@@ -813,6 +815,7 @@ def main() -> None:
     print(f"[mode] CONTENT_MODE={CONTENT_MODE}")
     print(f"[mode] STATIC_REEL_MODE={str(STATIC_REEL_MODE).lower()}")
     print(f"[mode] STATIC_REEL_FORMAT={STATIC_REEL_FORMAT}")
+    print(f"[mode] DEFAULT_STOCK_TICKER={DEFAULT_STOCK_TICKER}")
     print(f"[mode] resolved content mode={resolve_content_mode()}")
     print(f"[mode] selected pipeline={selected_pipeline_name()}")
 
