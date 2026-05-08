@@ -3,10 +3,19 @@ from __future__ import annotations
 from pathlib import Path
 from typing import List
 
+import numpy as np
+from PIL import Image
+
 try:
     from moviepy.editor import ImageClip, concatenate_videoclips
 except Exception:
     from moviepy import ImageClip, concatenate_videoclips
+
+
+try:
+    _LANCZOS = Image.Resampling.LANCZOS
+except Exception:
+    _LANCZOS = Image.LANCZOS
 
 
 def _set_duration(clip, duration: float):
@@ -29,14 +38,15 @@ def _set_position(clip, pos):
 
 def _fit_and_pan(card_path: str, duration: float, idx: int):
     # Card ratio 4:5 -> reel 9:16. Use subtle pan only.
-    clip = ImageClip(card_path)
-    clip = _set_duration(clip, duration)
+    with Image.open(card_path) as im:
+        src = im.convert("RGB")
+        base_h = 1920
+        target_w = max(1, int(src.width * (base_h / max(1, src.height))))
+        resized = src.resize((target_w, base_h), _LANCZOS)
+        frame = np.array(resized)
 
-    base_h = 1920
-    if hasattr(clip, "resized"):
-        clip = clip.resized(height=base_h)
-    else:
-        clip = clip.resize(height=base_h)
+    clip = ImageClip(frame)
+    clip = _set_duration(clip, duration)
 
     x_start = -36 - (idx * 3)
     x_end = -12 + (idx * 2)
