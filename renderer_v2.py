@@ -14,14 +14,13 @@ try:
 except Exception:
     from moviepy import AudioClip, AudioFileClip, ImageClip, concatenate_videoclips
 
-from image_generator_new import safe_generate_bg
-
 W, H = 1080, 1920
 BASE_DIR = os.path.dirname(__file__)
 FONT_DIR = os.path.join(BASE_DIR, "fonts")
 ASSETS_AUDIO = os.path.join(BASE_DIR, "assets", "audio", "bg.mp3")
 BOLD_PATH = os.path.join(FONT_DIR, "Pretendard-Bold.ttf")
 REG_PATH = os.path.join(FONT_DIR, "Pretendard-Regular.ttf")
+ENABLE_OPENAI_IMAGE = (os.getenv("ENABLE_OPENAI_IMAGE") or "false").lower() == "true"
 
 
 def _font(size: int, bold: bool = True):
@@ -116,13 +115,49 @@ def _draw_subline(base: Image.Image, text: str, sub: str = "") -> Image.Image:
     return img
 
 
+def _local_editorial_bg(text_seed: str, out_path: str) -> str:
+    # Low-cost mode default: no external model call.
+    seed = sum(ord(c) for c in str(text_seed or "")) % 40
+    top = (12 + seed // 4, 22 + seed // 5, 34 + seed // 6)
+    bottom = (28 + seed // 3, 46 + seed // 4, 66 + seed // 5)
+    img = Image.new("RGB", (W, H), top)
+    draw = ImageDraw.Draw(img)
+    for y in range(H):
+        t = y / max(1, H - 1)
+        r = int(top[0] * (1 - t) + bottom[0] * t)
+        g = int(top[1] * (1 - t) + bottom[1] * t)
+        b = int(top[2] * (1 - t) + bottom[2] * t)
+        draw.line([(0, y), (W, y)], fill=(r, g, b))
+    img = ImageEnhance.Contrast(img).enhance(1.06)
+    img.save(out_path, quality=95)
+    return out_path
+
+
+def _try_openai_bg(text_seed: str, out_path: str) -> Optional[str]:
+    if not ENABLE_OPENAI_IMAGE:
+        return None
+    try:
+        from image_generator_new import safe_generate_bg
+    except Exception as e:
+        print(f"[renderer_v2] OpenAI bg import skipped: {repr(e)}")
+        return None
+    try:
+        safe_generate_bg(
+            visual_topic="market_general",
+            seed_text=text_seed,
+            context_title=text_seed,
+            output_path=out_path,
+        )
+        return out_path
+    except Exception as e:
+        print(f"[renderer_v2] OpenAI bg generation failed: {repr(e)}")
+        return None
+
+
 def _make_fallback_bg(text_seed: str, out_path: str) -> str:
-    safe_generate_bg(
-        visual_topic="market_general",
-        seed_text=text_seed,
-        context_title=text_seed,
-        output_path=out_path,
-    )
+    generated = _try_openai_bg(text_seed, out_path)
+    if not generated:
+        generated = _local_editorial_bg(text_seed, out_path)
     img = Image.open(out_path).convert("RGB")
     _cover_crop(ImageEnhance.Brightness(img).enhance(0.96)).save(out_path, quality=95)
     return out_path

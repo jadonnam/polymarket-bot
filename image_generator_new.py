@@ -1,14 +1,7 @@
 import os
 import hashlib
 import requests
-from openai import OpenAI
 from PIL import Image, ImageDraw, ImageFilter
-
-OPENAI_API_KEY = (os.getenv("OPENAI_API_KEY") or "").strip()
-if not OPENAI_API_KEY:
-    raise RuntimeError("OPENAI_API_KEY 환경변수가 비어 있습니다.")
-
-client = OpenAI(api_key=OPENAI_API_KEY)
 
 IMAGE_MODEL = os.getenv("IMAGE_MODEL", "dall-e-3")
 IMAGE_QUALITY = os.getenv("IMAGE_QUALITY", "hd")
@@ -236,6 +229,17 @@ def _save_image_from_response(result, output_path):
     return output_path
 
 
+def _get_openai_client():
+    api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY 환경변수가 비어 있습니다.")
+    try:
+        from openai import OpenAI
+    except Exception as e:
+        raise RuntimeError(f"openai 패키지 import 실패: {repr(e)}") from e
+    return OpenAI(api_key=api_key)
+
+
 def generate_bg(
     visual_topic="market_general",
     seed_text="",
@@ -243,6 +247,7 @@ def generate_bg(
     context_desc="",
     output_path="bg.jpg"
 ):
+    client = _get_openai_client()
     prompt = build_prompt(
         visual_topic=visual_topic,
         seed_text=seed_text,
@@ -296,6 +301,7 @@ def safe_generate_bg(
 
 
 def generate_carousel_bgs(visual_topic, seed_text, context_title="", context_desc=""):
+    client = _get_openai_client()
     paths = []
     variants = SCENE_VARIANTS.get(visual_topic, SCENE_VARIANTS["market_general"])
 
