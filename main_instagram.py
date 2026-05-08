@@ -20,6 +20,11 @@ except Exception:
     upload_reel = None
 
 try:
+    from content_dispatcher import send_storage_video
+except Exception:
+    send_storage_video = None
+
+try:
     from threads_auto import (
         run_jadonnam_midday_post,
         run_omniflow_single,
@@ -39,6 +44,7 @@ BREAKING_COOLDOWN_MINUTES = 720
 BREAKING_NEWS_MIN_SCORE = 108
 BREAKING_POLY_MIN_SCORE = 92
 ENABLE_INSTAGRAM_UPLOAD = (os.getenv("ENABLE_INSTAGRAM_UPLOAD") or "false").lower() == "true"
+ENABLE_TELEGRAM_STORAGE = (os.getenv("ENABLE_TELEGRAM_STORAGE") or "false").lower() == "true"
 USE_INSTAGRAM_FOR_BREAKING = (os.getenv("USE_INSTAGRAM_FOR_BREAKING") or "false").lower() == "true"
 FORCE_REGULAR_NOW = (os.getenv("FORCE_REGULAR_NOW") or "false").lower() == "true"
 
@@ -515,6 +521,15 @@ def post_regular_rank_cards() -> None:
     top_labels = [news_items[0]["label"], poly_items[0]["label"], market_items[0]["label"]]
     reel_path = build_reel(paths[0], paths[1], paths[2], pack["reel_hook"], os.path.join(OUT_DIR, "reel_output.mp4"), top_labels=top_labels)
     print(f"[릴스 생성 완료] path={reel_path}")
+    if ENABLE_TELEGRAM_STORAGE:
+        if send_storage_video is not None:
+            try:
+                send_storage_video(reel_path, caption="[릴스 생성 완료]\noutput_rank/reel_output.mp4")
+                print("[텔레그램 저장 채널 업로드 완료]")
+            except Exception as e:
+                print(f"[텔레그램 저장 채널 업로드 오류] {repr(e)}")
+        else:
+            print("[텔레그램 저장 채널] send_storage_video 미사용(모듈 없음)")
 
     ig_ok = False
     # 인스타 릴스 자동업로드

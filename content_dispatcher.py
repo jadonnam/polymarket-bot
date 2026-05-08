@@ -6,6 +6,7 @@ import requests
 
 BOT_TOKEN = (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
 CHAT_ID = (os.getenv("TELEGRAM_CHAT_ID") or "").strip()
+STORAGE_CHAT_ID = (os.getenv("TELEGRAM_STORAGE_CHAT_ID") or "").strip()
 DRY_RUN = (os.getenv("DRY_RUN") or "false").lower() == "true"
 
 
@@ -20,6 +21,15 @@ def _check() -> None:
 
 def _url(method: str) -> str:
     return f"https://api.telegram.org/bot{BOT_TOKEN}/{method}"
+
+
+def _check_storage() -> None:
+    if DRY_RUN:
+        return
+    if not BOT_TOKEN:
+        raise RuntimeError("TELEGRAM_BOT_TOKEN not set")
+    if not STORAGE_CHAT_ID:
+        raise RuntimeError("TELEGRAM_STORAGE_CHAT_ID not set")
 
 
 def send_message(text: str) -> None:
@@ -60,6 +70,21 @@ def send_video(path: str, caption: str = "") -> None:
         res = requests.post(
             _url("sendVideo"),
             data={"chat_id": CHAT_ID, "caption": caption, "supports_streaming": "true"},
+            files={"video": f},
+            timeout=180,
+        )
+    res.raise_for_status()
+
+
+def send_storage_video(path: str, caption: str = "") -> None:
+    _check_storage()
+    if DRY_RUN:
+        print(f"[DRY_RUN] send_storage_video: {path} | {caption[:120]}")
+        return
+    with open(path, "rb") as f:
+        res = requests.post(
+            _url("sendVideo"),
+            data={"chat_id": STORAGE_CHAT_ID, "caption": caption, "supports_streaming": "true"},
             files={"video": f},
             timeout=180,
         )
