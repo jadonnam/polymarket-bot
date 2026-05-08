@@ -621,10 +621,12 @@ def main() -> None:
 
     # 정규 업로드 (08시 / 19시)
     try:
+        print("[정규 업로드 체크 시작]")
         if should_run_regular_post():
             if already_sent_regular():
                 print("[정규 업로드 스킵] 이미 전송됨")
             else:
+                print("[정규 업로드 실행]")
                 post_regular_rank_cards()
         else:
             print("[정규 업로드 시간 아님]")
