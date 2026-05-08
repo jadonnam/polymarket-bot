@@ -7,9 +7,11 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 import news as news_module
+from content_topics_v1 import pick_single_topic
 from card_news_v2 import build_card_news_v2
 from card_v3 import create_breaking_image
 from editorial_renderer import render_card_news_v2
+from market_fact_cards import build_market_fact_cards
 from rank_card_v3 import create_rank_set
 from reel_pack_v2 import build_reel_pack_v2
 from reels_maker_final import build_reel
@@ -39,6 +41,7 @@ SCORE_HISTORY_FILE = "score_history.json"
 THREADS_MIDDAY_STATE_FILE = "threads_midday_state.json"
 OUT_DIR = "output_rank"
 CARD_OUT_DIR = "output_cardnews"
+MARKET_FACT_OUT_DIR = "output_marketfact"
 
 REGULAR_POST_MINUTE_WINDOW = int((os.getenv("REGULAR_POST_MINUTE_WINDOW") or "30").strip())
 REGULAR_MORNING_MINUTE = 8 * 60 + 10
@@ -52,6 +55,7 @@ ENABLE_TELEGRAM_STORAGE = (os.getenv("ENABLE_TELEGRAM_STORAGE") or "false").lowe
 FORCE_REGULAR_NOW = (os.getenv("FORCE_REGULAR_NOW") or "false").lower() == "true"
 USE_REEL_STORY_V2 = (os.getenv("USE_REEL_STORY_V2") or "true").lower() == "true"
 CARD_NEWS_MODE = (os.getenv("CARD_NEWS_MODE") or "false").lower() == "true"
+CONTENT_MODE = (os.getenv("CONTENT_MODE") or "briefing").strip().lower()
 
 # 스레드 중간 포스팅 시간 (KST 시간 기준)
 THREADS_MIDDAY_HOURS = [9, 13, 17, 21]
@@ -63,10 +67,27 @@ def now_kst() -> datetime:
 
 def selected_pipeline_name() -> str:
     if CARD_NEWS_MODE:
+        mode = resolve_content_mode()
+        if mode == "market_fact":
+            return "market_fact"
         return "card_news_v2"
     if USE_REEL_STORY_V2:
         return "reel_story_v2"
     return "legacy_top5_reel"
+
+
+def resolve_content_mode() -> str:
+    # auto mode suggestion: 08:10 briefing, 19:10 market_fact
+    mode = CONTENT_MODE
+    if mode in ("market_fact", "briefing"):
+        return mode
+    if mode == "auto":
+        slot = current_regular_slot()
+        if slot == "morning":
+            return "briefing"
+        if slot == "evening":
+            return "market_fact"
+    return "briefing"
 
 
 def generated_at_text() -> str:
@@ -494,7 +515,13 @@ def post_regular_rank_cards() -> None:
     print(f"[mode] selected pipeline={selected_pipeline_name()}")
 
     if CARD_NEWS_MODE:
-        post_card_news_v2()
+        content_mode = resolve_content_mode()
+        print(f"[mode] CONTENT_MODE={CONTENT_MODE}")
+        print(f"[mode] resolved content mode={content_mode}")
+        if content_mode == "market_fact":
+            post_market_fact_content()
+        else:
+            post_card_news_v2()
         return
 
     history = load_score_history()
@@ -607,6 +634,95 @@ def post_card_news_v2() -> None:
     mark_regular_sent()
 
 
+def _topic_symbol(topic_slug: str) -> str:
+    mapping = {
+        "bitcoin": "BTC",
+        "ai": "NVDA",
+        "semiconductor": "NVDA",
+        "big_tech": "AAPL",
+        "tna": "TSLA",
+        "rates": "SPY",
+        "cpi": "SPY",
+        "us_stocks": "SPY",
+        "etf": "QQQ",
+        "market_rank": "QQQ",
+    }
+    return mapping.get(topic_slug, "SPY")
+
+
+def post_market_fact_content() -> None:
+    os.makedirs(MARKET_FACT_OUT_DIR, exist_ok=True)
+    raw_articles = fetch_news_articles(hours_back=24, limit=40)
+    topic = pick_single_topic()
+    topic_title = str(topic.get("title", "오늘 시장 핵심"))
+    topic_slug = str(topic.get("slug", "market_fact"))
+
+    image_urls: List[str] = []
+    for article in raw_articles:
+        u = str(article.get("urlToImage", "")).strip()
+        if u and u not in image_urls:
+            image_urls.append(u)
+        if len(image_urls) >= 5:
+            break
+
+    bullets = [
+        f"{str(topic.get('category', '시장'))} 핵심 포인트",
+        "오늘 자금이 가장 먼저 반응한 구간",
+        "수급·심리·변동성에서 동시에 확인",
+        "내일 장 시작 전 체크할 기준점",
+        "한 줄 결론: 저장 후 비교",
+    ]
+
+    pack = {
+        "title": topic_title,
+        "symbol": _topic_symbol(topic_slug),
+        "image_urls": image_urls,
+        "bullets": bullets,
+    }
+    card_paths = build_market_fact_cards(pack, out_dir=MARKET_FACT_OUT_DIR)
+    reel_path = build_reel_pack_v2(card_paths, out_path=os.path.join(MARKET_FACT_OUT_DIR, "reel_output.mp4"), per_card_sec=3.8)
+
+    caption_lines = [
+        f"1) 주제: {topic_title}",
+        f"2) 카테고리: {str(topic.get('category', '시장'))}",
+        "3) 오늘 시장이 먼저 반응한 핵심 포인트 정리",
+        "4) 숫자보다 구조를 먼저 보면 흐름이 보입니다",
+        "5) 내일 장 시작 전에 다시 보면 더 선명해집니다",
+        "저장해두고 다음 변동 때 비교하세요.",
+        "#경제 #경제뉴스 #미국주식 #ETF #빅테크 #비트코인 #금리 #CPI #장기투자 #투자",
+    ]
+    caption_text = "\n".join(caption_lines)
+    caption_path = os.path.join(MARKET_FACT_OUT_DIR, "caption.txt")
+    with open(caption_path, "w", encoding="utf-8") as f:
+        f.write(caption_text + "\n")
+
+    expected_files = card_paths + [reel_path, caption_path]
+    for path in expected_files:
+        print(f"[market_fact] output check: {path} exists={os.path.exists(path)}")
+
+    if ENABLE_TELEGRAM_STORAGE:
+        if send_storage_media_group is not None:
+            send_storage_media_group(card_paths)
+            print("[market_fact] 저장 채널 카드 5장 전송 완료")
+        else:
+            print("[market_fact] send_storage_media_group 미사용(모듈 없음)")
+        if send_storage_video is not None:
+            send_storage_video(reel_path, caption="[market_fact 릴스]\noutput_marketfact/reel_output.mp4")
+            print("[market_fact] 저장 채널 릴스 전송 완료")
+        else:
+            print("[market_fact] send_storage_video 미사용(모듈 없음)")
+        if send_storage_message is not None:
+            send_storage_message(f"[market_fact 캡션]\n{caption_text}")
+            print("[market_fact] 저장 채널 캡션 전송 완료")
+        else:
+            print("[market_fact] send_storage_message 미사용(모듈 없음)")
+    else:
+        print("[market_fact] ENABLE_TELEGRAM_STORAGE=false, 저장 채널 전송 생략")
+
+    print("[market_fact] 인스타 자동업로드 비활성화")
+    mark_regular_sent()
+
+
 def _breaking_news_score(article: Dict[str, Any]) -> int:
     try:
         return news_module.score_breaking_article(article)
@@ -629,9 +745,12 @@ def main() -> None:
     os.makedirs(OUT_DIR, exist_ok=True)
     if CARD_NEWS_MODE:
         os.makedirs(CARD_OUT_DIR, exist_ok=True)
+        os.makedirs(MARKET_FACT_OUT_DIR, exist_ok=True)
 
     print(f"[mode] CARD_NEWS_MODE={str(CARD_NEWS_MODE).lower()}")
     print(f"[mode] USE_REEL_STORY_V2={str(USE_REEL_STORY_V2).lower()}")
+    print(f"[mode] CONTENT_MODE={CONTENT_MODE}")
+    print(f"[mode] resolved content mode={resolve_content_mode()}")
     print(f"[mode] selected pipeline={selected_pipeline_name()}")
 
     print(

@@ -10,6 +10,7 @@
 - ENABLE_TELEGRAM_STORAGE=true
 - CARD_NEWS_MODE=true
 - USE_REEL_STORY_V2=false
+- CONTENT_MODE=market_fact
 - FORCE_REGULAR_NOW=false
 - CHECK_INTERVAL=1800
 - DRY_RUN_PIPELINE=false
@@ -26,13 +27,14 @@
 - Railway Variables에서 FORCE_REGULAR_NOW=true 로 1회 테스트
 - 실행 로그에서 카드뉴스 5장 + 무음 릴스 생성 확인
 - 생성 파일 확인:
-  - output_cardnews/card_01.jpg
-  - output_cardnews/card_02.jpg
-  - output_cardnews/card_03.jpg
-  - output_cardnews/card_04.jpg
-  - output_cardnews/card_05.jpg
-  - output_cardnews/reel_output.mp4
-  - output_cardnews/caption.txt
+  - CONTENT_MODE=briefing:
+    - output_cardnews/card_01.jpg ~ card_05.jpg
+    - output_cardnews/reel_output.mp4
+    - output_cardnews/caption.txt
+  - CONTENT_MODE=market_fact:
+    - output_marketfact/card_01.jpg ~ card_05.jpg
+    - output_marketfact/reel_output.mp4
+    - output_marketfact/caption.txt
 - 텔레그램 저장 채널 전송 확인:
   - 카드 5장 media group
   - 릴스 mp4
@@ -57,6 +59,11 @@ git push origin main
 - 30분마다 실행 권장
 - 속보: 기본 비활성화(SKIP_BREAKING_CHECK=true)
 - 정규시간(08:10, 19:10 KST):
-  - CARD_NEWS_MODE=true: 카드뉴스 5장 + 무음 릴스(카드 영상화) 생성
+  - CARD_NEWS_MODE=true + CONTENT_MODE=briefing: 브리핑형 카드뉴스 생성
+  - CARD_NEWS_MODE=true + CONTENT_MODE=market_fact: 정보형 저장 콘텐츠 생성
   - CARD_NEWS_MODE=false: 기존 저비용 TOP5 구조 유지
 - 전송 대상: 비공개 Telegram 저장 채널 전용(정보방/인스타 자동업로드 비활성화)
+
+운영 스케줄 제안:
+- 08:10 KST: CONTENT_MODE=briefing
+- 19:10 KST: CONTENT_MODE=market_fact
