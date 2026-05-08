@@ -156,11 +156,15 @@ def _generate_openai_bg_cached(output_dir: str, ticker: str) -> Optional[Image.I
         return None
 
     prompt = (
-        "Vertical editorial finance background photo for social media, realistic corporate technology atmosphere, "
-        "AI datacenter mood, premium business news poster style, cinematic lighting, green and black color palette, "
-        "high detail, no text, no logo, no watermark, no brand mark."
+        "Vertical 9:16 photorealistic social media thumbnail for a US stock study reel about an AI semiconductor company. "
+        "Cinematic editorial composition with a strong central focal subject, high contrast, deep black shadows, and vivid green accent lighting. "
+        "Include an executive-like silhouette reminiscent of a major AI chip CEO (not an exact person), "
+        "plus subtle cues of GPU hardware, AI compute clusters, and premium semiconductor industry atmosphere. "
+        "The mood should feel like Bloomberg x Instagram finance thumbnail, dramatic and save-worthy, not generic server room background. "
+        "Poster-like, punchy, clean depth, center-weighted composition, realistic news-thumbnail energy. "
+        "No text, no letters, no logos, no watermark, no infographic, no fake app UI, no PPT look."
     )
-    models = [("gpt-image-1", "1024x1536"), ("dall-e-3", "1024x1792")]
+    models = [("gpt-image-1", "1024x1536")]
     for model, size in models:
         try:
             result = client.images.generate(model=model, prompt=prompt, size=size)
@@ -228,20 +232,6 @@ def _load_company_logo(data: Dict[str, object]) -> Optional[Image.Image]:
     return None
 
 
-def _nvidia_brand_fallback() -> Image.Image:
-    img = _base()
-    d = ImageDraw.Draw(img)
-    # black base with Nvidia green accents + keywords
-    for y in range(H):
-        v = int(8 + 14 * (y / H))
-        d.line([(0, y), (W, y)], fill=(v, v + 2, v))
-    d.rectangle((0, 0, W, 18), fill=(118, 220, 118))
-    d.rectangle((0, H - 18, W, H), fill=(118, 220, 118))
-    d.text((70, 540), "NVIDIA", fill=(230, 245, 230), font=_font(148, True))
-    d.text((74, 702), "AI  ·  GPU  ·  DATA CENTER", fill=(138, 228, 138), font=_font(44, True))
-    return img
-
-
 def _poster_stock_study(stock_ticker: str = "NVDA", output_dir: str = "output_static_reel") -> Image.Image:
     ticker = (stock_ticker or "NVDA").upper().strip()
     data = _company_data(ticker)
@@ -249,8 +239,6 @@ def _poster_stock_study(stock_ticker: str = "NVDA", output_dir: str = "output_st
     bg_raw = ai_bg if ai_bg is not None else _load_company_photo(data)
     if bg_raw is not None:
         img = _cover(bg_raw, W, H)
-    elif ticker == "NVDA":
-        img = _nvidia_brand_fallback()
     else:
         img = _base()
     img = Image.blend(img, _base(), alpha=0.28)
