@@ -605,6 +605,14 @@ def post_breaking() -> None:
 def main() -> None:
     os.makedirs(OUT_DIR, exist_ok=True)
 
+    print(
+        "[debug schedule]",
+        "FORCE_REGULAR_NOW=", FORCE_REGULAR_NOW,
+        "current_regular_slot()=", current_regular_slot(),
+        "should_run_regular_post()=", should_run_regular_post(),
+        "already_sent_regular()=", already_sent_regular(),
+    )
+
     # 속보 체크
     try:
         post_breaking()
