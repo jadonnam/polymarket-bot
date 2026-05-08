@@ -13,6 +13,8 @@ from polymarket import get_polymarket_markets
 from rank_card_v3 import create_rank_set
 from reels_maker_final import build_reel
 from reels_packager import build_content_pack
+from reel_story_v2 import build_reel_story_v2
+from renderer_v2 import render_reel_story_v2
 
 try:
     from instagram_v2 import upload_instagram, upload_reel
@@ -42,6 +44,7 @@ BREAKING_NEWS_MIN_SCORE = 108
 BREAKING_POLY_MIN_SCORE = 92
 USE_INSTAGRAM_FOR_BREAKING = (os.getenv("USE_INSTAGRAM_FOR_BREAKING") or "false").lower() == "true"
 FORCE_REGULAR_NOW = (os.getenv("FORCE_REGULAR_NOW") or "false").lower() == "true"
+USE_REEL_STORY_V2 = (os.getenv("USE_REEL_STORY_V2") or "true").lower() == "true"
 
 # 스레드 중간 포스팅 시간 (KST 시간 기준)
 THREADS_MIDDAY_HOURS = [9, 13, 17, 21]
@@ -513,8 +516,19 @@ def post_regular_rank_cards() -> None:
 
     paths = create_rank_set(news_items, poly_items, market_items, out_dir=OUT_DIR, generated_at_text=generated_at_text())
     pack = build_content_pack(news_items, poly_items, market_items)
-    top_labels = [news_items[0]["label"], poly_items[0]["label"], market_items[0]["label"]]
-    reel_path = build_reel(paths[0], paths[1], paths[2], pack["reel_hook"], os.path.join(OUT_DIR, "reel_output.mp4"), top_labels=top_labels)
+    if USE_REEL_STORY_V2:
+        raw_articles = fetch_news_articles(hours_back=24, limit=30)
+        story = build_reel_story_v2(news_items, poly_items, market_items, raw_articles=raw_articles)
+        reel_path = render_reel_story_v2(story, os.path.join(OUT_DIR, "reel_output.mp4"))
+        if story.get("meta", {}).get("reel_caption"):
+            pack["reel_caption"] = story["meta"]["reel_caption"]
+        if story.get("meta", {}).get("reel_hook"):
+            pack["reel_hook"] = story["meta"]["reel_hook"]
+        if story.get("meta", {}).get("hashtags"):
+            pack["hashtags"] = story["meta"]["hashtags"]
+    else:
+        top_labels = [news_items[0]["label"], poly_items[0]["label"], market_items[0]["label"]]
+        reel_path = build_reel(paths[0], paths[1], paths[2], pack["reel_hook"], os.path.join(OUT_DIR, "reel_output.mp4"), top_labels=top_labels)
 
     # 텔레그램 전송
     send_media_group(paths)
