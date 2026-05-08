@@ -513,18 +513,27 @@ def post_regular_rank_cards() -> None:
     pack = build_content_pack(news_items, poly_items, market_items)
     top_labels = [news_items[0]["label"], poly_items[0]["label"], market_items[0]["label"]]
     reel_path = build_reel(paths[0], paths[1], paths[2], pack["reel_hook"], os.path.join(OUT_DIR, "reel_output.mp4"), top_labels=top_labels)
+    print(f"[릴스 생성 완료] path={reel_path}")
 
+    ig_ok = False
     # 인스타 릴스 자동업로드
     if upload_reel is not None:
         try:
             media = upload_reel(reel_path, pack["reel_caption"])
             if media is not None:
-                print("[인스타 릴스 자동업로드 완료]")
+                ig_ok = True
         except Exception as e:
             print(f"[인스타 릴스 업로드 오류] {repr(e)}")
+    else:
+        print("[인스타 릴스] upload_reel 미사용(모듈 없음)")
 
     mark_regular_sent()
-    print("[정규 업로드 완료]")
+    if ig_ok:
+        print("[정규 파이프라인] 릴스 생성 완료 / 인스타 업로드 성공")
+    elif upload_reel is None:
+        print("[정규 파이프라인] 릴스 생성 완료 / 인스타 업로드 안 함")
+    else:
+        print("[정규 파이프라인] 릴스 생성 완료 / 인스타 업로드 실패")
 
 
 def _breaking_news_score(article: Dict[str, Any]) -> int:
@@ -613,6 +622,8 @@ def main() -> None:
         "should_run_regular_post()=", should_run_regular_post(),
         "already_sent_regular()=", already_sent_regular(),
     )
+    if FORCE_REGULAR_NOW:
+        print("[안내] FORCE_REGULAR_NOW 테스트 후 Railway 환경변수를 false로 원복하세요")
 
     # 속보 체크
     try:
