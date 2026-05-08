@@ -39,7 +39,9 @@ SCORE_HISTORY_FILE = "score_history.json"
 THREADS_MIDDAY_STATE_FILE = "threads_midday_state.json"
 OUT_DIR = "output_rank"
 
-REGULAR_POST_MINUTE_WINDOW = 90
+REGULAR_POST_MINUTE_WINDOW = int((os.getenv("REGULAR_POST_MINUTE_WINDOW") or "30").strip())
+REGULAR_MORNING_MINUTE = 8 * 60 + 10
+REGULAR_EVENING_MINUTE = 19 * 60 + 10
 BREAKING_COOLDOWN_MINUTES = 720
 BREAKING_NEWS_MIN_SCORE = 108
 BREAKING_POLY_MIN_SCORE = 92
@@ -81,9 +83,9 @@ def _save_json(path: str, data) -> None:
 def current_regular_slot() -> Optional[str]:
     now = now_kst()
     total = now.hour * 60 + now.minute
-    if 8 * 60 <= total < 8 * 60 + REGULAR_POST_MINUTE_WINDOW:
+    if REGULAR_MORNING_MINUTE <= total < REGULAR_MORNING_MINUTE + REGULAR_POST_MINUTE_WINDOW:
         return "morning"
-    if 19 * 60 <= total < 19 * 60 + REGULAR_POST_MINUTE_WINDOW:
+    if REGULAR_EVENING_MINUTE <= total < REGULAR_EVENING_MINUTE + REGULAR_POST_MINUTE_WINDOW:
         return "evening"
     return None
 
@@ -257,12 +259,12 @@ def regular_window_bounds() -> Tuple[Optional[datetime], Optional[datetime]]:
     now = now_kst()
     slot = current_regular_slot()
     if slot == "morning":
-        end_kst = now.replace(hour=8, minute=0, second=0, microsecond=0)
-        start_kst = (end_kst - timedelta(days=1)).replace(hour=19, minute=0, second=0, microsecond=0)
+        end_kst = now.replace(hour=8, minute=10, second=0, microsecond=0)
+        start_kst = (end_kst - timedelta(days=1)).replace(hour=19, minute=10, second=0, microsecond=0)
         return start_kst.astimezone(timezone.utc), end_kst.astimezone(timezone.utc)
     if slot == "evening":
-        end_kst = now.replace(hour=19, minute=0, second=0, microsecond=0)
-        start_kst = now.replace(hour=8, minute=0, second=0, microsecond=0)
+        end_kst = now.replace(hour=19, minute=10, second=0, microsecond=0)
+        start_kst = now.replace(hour=8, minute=10, second=0, microsecond=0)
         return start_kst.astimezone(timezone.utc), end_kst.astimezone(timezone.utc)
     return None, None
 
@@ -667,7 +669,7 @@ def main() -> None:
         except Exception as e:
             print("[속보 처리 오류]", repr(e))
 
-    # 정규 업로드 (08시 / 19시)
+    # 정규 업로드 (08:10 / 19:10 KST)
     try:
         print("[정규 업로드 체크 시작]")
         if should_run_regular_post():
