@@ -38,6 +38,7 @@ REGULAR_POST_MINUTE_WINDOW = 90
 BREAKING_COOLDOWN_MINUTES = 720
 BREAKING_NEWS_MIN_SCORE = 108
 BREAKING_POLY_MIN_SCORE = 92
+ENABLE_INSTAGRAM_UPLOAD = (os.getenv("ENABLE_INSTAGRAM_UPLOAD") or "false").lower() == "true"
 USE_INSTAGRAM_FOR_BREAKING = (os.getenv("USE_INSTAGRAM_FOR_BREAKING") or "false").lower() == "true"
 FORCE_REGULAR_NOW = (os.getenv("FORCE_REGULAR_NOW") or "false").lower() == "true"
 
@@ -517,7 +518,9 @@ def post_regular_rank_cards() -> None:
 
     ig_ok = False
     # 인스타 릴스 자동업로드
-    if upload_reel is not None:
+    if not ENABLE_INSTAGRAM_UPLOAD:
+        print("[인스타 업로드 비활성화] 릴스 파일만 생성됨")
+    elif upload_reel is not None:
         try:
             media = upload_reel(reel_path, pack["reel_caption"])
             if media is not None:
@@ -530,6 +533,8 @@ def post_regular_rank_cards() -> None:
     mark_regular_sent()
     if ig_ok:
         print("[정규 파이프라인] 릴스 생성 완료 / 인스타 업로드 성공")
+    elif not ENABLE_INSTAGRAM_UPLOAD:
+        print("[정규 파이프라인] 릴스 생성 완료 / 인스타 업로드 비활성화")
     elif upload_reel is None:
         print("[정규 파이프라인] 릴스 생성 완료 / 인스타 업로드 안 함")
     else:
