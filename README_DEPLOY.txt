@@ -11,6 +11,8 @@
 - CARD_NEWS_MODE=true
 - USE_REEL_STORY_V2=false
 - CONTENT_MODE=market_fact
+- STATIC_REEL_MODE=true
+- STATIC_REEL_FORMAT=stock_study  # stock_study | ranking
 - FORCE_REGULAR_NOW=false
 - CHECK_INTERVAL=1800
 - DRY_RUN_PIPELINE=false
@@ -27,6 +29,10 @@
 - Railway Variables에서 FORCE_REGULAR_NOW=true 로 1회 테스트
 - 실행 로그에서 카드뉴스 5장 + 무음 릴스 생성 확인
 - 생성 파일 확인:
+  - STATIC_REEL_MODE=true:
+    - output_static_reel/poster.jpg
+    - output_static_reel/reel_output.mp4
+    - output_static_reel/caption.txt
   - CONTENT_MODE=briefing:
     - output_cardnews/card_01.jpg ~ card_05.jpg
     - output_cardnews/reel_output.mp4
@@ -36,9 +42,14 @@
     - output_marketfact/reel_output.mp4
     - output_marketfact/caption.txt
 - 텔레그램 저장 채널 전송 확인:
-  - 카드 5장 media group
-  - 릴스 mp4
-  - caption 텍스트 메시지
+  - STATIC_REEL_MODE=true:
+    - poster.jpg
+    - reel_output.mp4
+    - caption 텍스트 메시지
+  - STATIC_REEL_MODE=false:
+    - 카드 5장 media group
+    - 릴스 mp4
+    - caption 텍스트 메시지
 - 테스트 후 FORCE_REGULAR_NOW=false 로 원복
 
 5) Git 명령어
@@ -59,6 +70,7 @@ git push origin main
 - 30분마다 실행 권장
 - 속보: 기본 비활성화(SKIP_BREAKING_CHECK=true)
 - 정규시간(08:10, 19:10 KST):
+  - STATIC_REEL_MODE=true: 고정형 정보 이미지 릴스(18초 무음) 생성
   - CARD_NEWS_MODE=true + CONTENT_MODE=briefing: 브리핑형 카드뉴스 생성
   - CARD_NEWS_MODE=true + CONTENT_MODE=market_fact: 정보형 저장 콘텐츠 생성
   - CARD_NEWS_MODE=false: 기존 저비용 TOP5 구조 유지

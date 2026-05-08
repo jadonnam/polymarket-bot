@@ -18,10 +18,12 @@ from reels_maker_final import build_reel
 from reels_packager import build_content_pack
 from reel_story_v2 import build_reel_story_v2
 from renderer_v2 import render_reel_story_v2
+from static_reel_v1 import build_static_reel_v1
 
 try:
-    from content_dispatcher import send_storage_media_group, send_storage_message, send_storage_video
+    from content_dispatcher import send_storage_image, send_storage_media_group, send_storage_message, send_storage_video
 except Exception:
+    send_storage_image = None
     send_storage_media_group = None
     send_storage_message = None
     send_storage_video = None
@@ -42,6 +44,7 @@ THREADS_MIDDAY_STATE_FILE = "threads_midday_state.json"
 OUT_DIR = "output_rank"
 CARD_OUT_DIR = "output_cardnews"
 MARKET_FACT_OUT_DIR = "output_marketfact"
+STATIC_REEL_OUT_DIR = "output_static_reel"
 
 REGULAR_POST_MINUTE_WINDOW = int((os.getenv("REGULAR_POST_MINUTE_WINDOW") or "30").strip())
 REGULAR_MORNING_MINUTE = 8 * 60 + 10
@@ -56,6 +59,8 @@ FORCE_REGULAR_NOW = (os.getenv("FORCE_REGULAR_NOW") or "false").lower() == "true
 USE_REEL_STORY_V2 = (os.getenv("USE_REEL_STORY_V2") or "true").lower() == "true"
 CARD_NEWS_MODE = (os.getenv("CARD_NEWS_MODE") or "false").lower() == "true"
 CONTENT_MODE = (os.getenv("CONTENT_MODE") or "briefing").strip().lower()
+STATIC_REEL_MODE = (os.getenv("STATIC_REEL_MODE") or "false").lower() == "true"
+STATIC_REEL_FORMAT = (os.getenv("STATIC_REEL_FORMAT") or "stock_study").strip().lower()
 
 # 스레드 중간 포스팅 시간 (KST 시간 기준)
 THREADS_MIDDAY_HOURS = [9, 13, 17, 21]
@@ -66,6 +71,8 @@ def now_kst() -> datetime:
 
 
 def selected_pipeline_name() -> str:
+    if STATIC_REEL_MODE:
+        return "static_reel_v1"
     if CARD_NEWS_MODE:
         mode = resolve_content_mode()
         if mode == "market_fact":
@@ -513,6 +520,10 @@ def post_regular_rank_cards() -> None:
     print(f"[mode] CARD_NEWS_MODE={str(CARD_NEWS_MODE).lower()}")
     print(f"[mode] USE_REEL_STORY_V2={str(USE_REEL_STORY_V2).lower()}")
     print(f"[mode] selected pipeline={selected_pipeline_name()}")
+    if STATIC_REEL_MODE:
+        print(f"[mode] STATIC_REEL_FORMAT={STATIC_REEL_FORMAT}")
+        post_static_reel_v1()
+        return
 
     if CARD_NEWS_MODE:
         content_mode = resolve_content_mode()
@@ -737,6 +748,52 @@ def post_market_fact_content() -> None:
     mark_regular_sent()
 
 
+def post_static_reel_v1() -> None:
+    os.makedirs(STATIC_REEL_OUT_DIR, exist_ok=True)
+    for name in ("poster.jpg", "reel_output.mp4", "caption.txt"):
+        p = os.path.join(STATIC_REEL_OUT_DIR, name)
+        if os.path.exists(p):
+            try:
+                os.remove(p)
+            except Exception:
+                pass
+
+    result = build_static_reel_v1(
+        output_dir=STATIC_REEL_OUT_DIR,
+        reel_format=STATIC_REEL_FORMAT,
+        duration_sec=18.0,
+    )
+    poster_path = result["poster_path"]
+    reel_path = result["reel_path"]
+    caption_path = result["caption_path"]
+    caption_text = result["caption_text"]
+
+    for path in (poster_path, reel_path, caption_path):
+        print(f"[static_reel] output check: {path} exists={os.path.exists(path)} size={os.path.getsize(path) if os.path.exists(path) else -1}")
+
+    if ENABLE_TELEGRAM_STORAGE:
+        if send_storage_image is not None:
+            send_storage_image(poster_path, caption="[static_reel 포스터]\noutput_static_reel/poster.jpg")
+            print("[static_reel] 저장 채널 poster 전송 완료")
+        else:
+            print("[static_reel] send_storage_image 미사용(모듈 없음)")
+        if send_storage_video is not None:
+            send_storage_video(reel_path, caption="[static_reel 영상]\noutput_static_reel/reel_output.mp4")
+            print("[static_reel] 저장 채널 reel 전송 완료")
+        else:
+            print("[static_reel] send_storage_video 미사용(모듈 없음)")
+        if send_storage_message is not None:
+            send_storage_message(f"[static_reel 캡션]\n{caption_text}")
+            print("[static_reel] 저장 채널 caption 전송 완료")
+        else:
+            print("[static_reel] send_storage_message 미사용(모듈 없음)")
+    else:
+        print("[static_reel] ENABLE_TELEGRAM_STORAGE=false, 저장 채널 전송 생략")
+
+    print("[static_reel] 인스타 자동업로드 비활성화")
+    mark_regular_sent()
+
+
 def _breaking_news_score(article: Dict[str, Any]) -> int:
     try:
         return news_module.score_breaking_article(article)
@@ -760,10 +817,14 @@ def main() -> None:
     if CARD_NEWS_MODE:
         os.makedirs(CARD_OUT_DIR, exist_ok=True)
         os.makedirs(MARKET_FACT_OUT_DIR, exist_ok=True)
+    if STATIC_REEL_MODE:
+        os.makedirs(STATIC_REEL_OUT_DIR, exist_ok=True)
 
     print(f"[mode] CARD_NEWS_MODE={str(CARD_NEWS_MODE).lower()}")
     print(f"[mode] USE_REEL_STORY_V2={str(USE_REEL_STORY_V2).lower()}")
     print(f"[mode] CONTENT_MODE={CONTENT_MODE}")
+    print(f"[mode] STATIC_REEL_MODE={str(STATIC_REEL_MODE).lower()}")
+    print(f"[mode] STATIC_REEL_FORMAT={STATIC_REEL_FORMAT}")
     print(f"[mode] resolved content mode={resolve_content_mode()}")
     print(f"[mode] selected pipeline={selected_pipeline_name()}")
 
