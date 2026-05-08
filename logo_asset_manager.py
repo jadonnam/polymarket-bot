@@ -81,3 +81,49 @@ def load_symbol_icon(name: str, size: int = 92) -> Image.Image:
     th = d.textbbox((0, 0), txt, font=font)[3]
     d.text(((size - tw) // 2, (size - th) // 2), txt, fill=(240, 244, 248, 255), font=font)
     return img
+
+
+def build_fallback_asset_background(style: str, symbol: str, width: int, height: int) -> Image.Image:
+    style = str(style or "").lower().strip()
+    base = Image.new("RGB", (width, height), (10, 12, 16))
+    d = ImageDraw.Draw(base)
+
+    palette = {
+        "btc": ((40, 28, 12), (20, 14, 8)),
+        "ai": ((10, 32, 28), (8, 18, 18)),
+        "etf": ((14, 24, 40), (10, 16, 28)),
+        "rates": ((24, 24, 28), (14, 14, 18)),
+        "us": ((16, 20, 34), (10, 14, 22)),
+    }
+    top, bottom = palette.get(style, ((18, 20, 24), (10, 12, 16)))
+    for y in range(height):
+        t = y / max(1, height - 1)
+        r = int(top[0] * (1 - t) + bottom[0] * t)
+        g = int(top[1] * (1 - t) + bottom[1] * t)
+        b = int(top[2] * (1 - t) + bottom[2] * t)
+        d.line([(0, y), (width, y)], fill=(r, g, b))
+
+    # subtle chart-like lines to avoid empty template feel
+    line_color = (84, 96, 116)
+    for i in range(6):
+        y = int(height * (0.22 + i * 0.11))
+        d.line([(0, y), (width, y)], fill=line_color, width=1)
+
+    logo = load_logo(symbol, min(220, width // 4))
+    sym = load_symbol_icon(style if style in ("btc", "ai", "etf", "rates", "us") else "us", min(140, width // 6))
+    base.paste(logo, (width - logo.width - 44, 38), logo)
+    base.paste(sym, (44, 40), sym)
+
+    # fake chart stroke
+    points = [
+        (int(width * 0.08), int(height * 0.72)),
+        (int(width * 0.24), int(height * 0.66)),
+        (int(width * 0.42), int(height * 0.69)),
+        (int(width * 0.58), int(height * 0.57)),
+        (int(width * 0.78), int(height * 0.61)),
+        (int(width * 0.92), int(height * 0.50)),
+    ]
+    d.line(points, fill=(112, 220, 160), width=5)
+    for x, y in points:
+        d.ellipse((x - 6, y - 6, x + 6, y + 6), fill=(112, 220, 160))
+    return base
