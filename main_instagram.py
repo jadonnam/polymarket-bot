@@ -770,11 +770,6 @@ def post_static_reel_v1() -> None:
         print(f"[static_reel] output check: {path} exists={os.path.exists(path)} size={os.path.getsize(path) if os.path.exists(path) else -1}")
 
     if ENABLE_TELEGRAM_STORAGE:
-        if send_storage_image is not None:
-            send_storage_image(poster_path, caption="[static_reel 포스터]\noutput_static_reel/poster.jpg")
-            print("[static_reel] 저장 채널 poster 전송 완료")
-        else:
-            print("[static_reel] send_storage_image 미사용(모듈 없음)")
         if send_storage_video is not None:
             send_storage_video(reel_path, caption="[static_reel 영상]\noutput_static_reel/reel_output.mp4")
             print("[static_reel] 저장 채널 reel 전송 완료")
