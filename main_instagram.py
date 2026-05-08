@@ -652,6 +652,16 @@ def _topic_symbol(topic_slug: str) -> str:
 
 def post_market_fact_content() -> None:
     os.makedirs(MARKET_FACT_OUT_DIR, exist_ok=True)
+    # Remove old artifacts first to avoid stale outputs.
+    for name in ("card_01.jpg", "card_02.jpg", "card_03.jpg", "card_04.jpg", "card_05.jpg", "reel_output.mp4", "caption.txt"):
+        p = os.path.join(MARKET_FACT_OUT_DIR, name)
+        if os.path.exists(p):
+            try:
+                os.remove(p)
+                print(f"[market_fact] removed stale file: {p}")
+            except Exception as e:
+                print(f"[market_fact] stale file remove failed: {p} err={repr(e)}")
+
     raw_articles = fetch_news_articles(hours_back=24, limit=40)
     topic = pick_single_topic()
     topic_title = str(topic.get("title", "오늘 시장 핵심"))
@@ -679,6 +689,7 @@ def post_market_fact_content() -> None:
         "image_urls": image_urls,
         "bullets": bullets,
     }
+    print("[market_fact] builder function=market_fact_cards.build_market_fact_cards")
     card_paths = build_market_fact_cards(pack, out_dir=MARKET_FACT_OUT_DIR)
     reel_path = build_reel_pack_v2(card_paths, out_path=os.path.join(MARKET_FACT_OUT_DIR, "reel_output.mp4"), per_card_sec=3.8)
 
@@ -698,7 +709,10 @@ def post_market_fact_content() -> None:
 
     expected_files = card_paths + [reel_path, caption_path]
     for path in expected_files:
-        print(f"[market_fact] output check: {path} exists={os.path.exists(path)}")
+        exists = os.path.exists(path)
+        size = os.path.getsize(path) if exists else -1
+        mtime = os.path.getmtime(path) if exists else -1
+        print(f"[market_fact] output check: {path} exists={exists} size={size} mtime={mtime}")
 
     if ENABLE_TELEGRAM_STORAGE:
         if send_storage_media_group is not None:
