@@ -519,7 +519,7 @@ def post_regular_rank_cards() -> None:
     ig_ok = False
     # 인스타 릴스 자동업로드
     if not ENABLE_INSTAGRAM_UPLOAD:
-        print(f"[인스타 업로드 비활성화] {reel_path} 파일만 생성됨")
+        print("[인스타 업로드 비활성화] 릴스 파일만 생성됨")
     elif upload_reel is not None:
         try:
             media = upload_reel(reel_path, pack["reel_caption"])
