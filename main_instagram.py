@@ -10,17 +10,10 @@ import news as news_module
 from content_topics_v1 import pick_single_topic
 from card_news_v2 import build_card_news_v2
 from card_v3 import create_breaking_image
-from editorial_renderer import render_card_news_v2
 from market_fact_cards import build_market_fact_cards
-from news_template import render_news_template
+from news_template import build_jadonnam_signature_cards
 from rank_card_v3 import create_rank_set
 from ranking_template import render_ranking_template
-from reel_pack_v2 import build_reel_pack_v2
-from reels_maker_final import build_reel
-from reels_packager import build_content_pack
-from reel_story_v2 import build_reel_story_v2
-from renderer_v2 import render_reel_story_v2
-from static_reel_v1 import build_static_reel_v1
 from stock_study_template import render_stock_study_template
 
 try:
@@ -79,15 +72,13 @@ def now_kst() -> datetime:
 
 def selected_pipeline_name() -> str:
     if STATIC_REEL_MODE:
-        return "static_reel_v1"
+        return "disabled_static_reel"
     if CARD_NEWS_MODE:
         mode = resolve_content_mode()
         if mode == "market_fact":
             return "market_fact"
         return "card_news_v2"
-    if USE_REEL_STORY_V2:
-        return "reel_story_v2"
-    return "legacy_top5_reel"
+    return "card_news_only"
 
 
 def resolve_content_mode() -> str:
@@ -541,45 +532,51 @@ def post_regular_rank_cards() -> None:
             post_card_news_v2()
         return
 
-    history = load_score_history()
-    news_items = attach_deltas("news", build_news_rank_items(), history)
-    poly_items = attach_deltas("poly", build_poly_rank_items(), history)
-    market_items = attach_deltas("market", build_market_rank_items(news_items, poly_items), history)
-    save_score_history(history)
-
-    paths = create_rank_set(news_items, poly_items, market_items, out_dir=OUT_DIR, generated_at_text=generated_at_text())
-    if ENABLE_TELEGRAM_STORAGE and send_storage_media_group is not None:
-        send_storage_media_group(paths)
-        print("[정규 카드] 저장 채널 카드 전송 완료")
-    else:
-        print("[정규 카드] 저장 채널 전송 생략")
-    print("[정규 카드] 릴스 자동화 비활성화")
+    # Non-card-news mode is intentionally disabled.
+    print("[policy] CARD_NEWS_MODE=false 경로 비활성화")
     mark_regular_sent()
 
 
 def post_card_news_v2() -> None:
     os.makedirs(CARD_OUT_DIR, exist_ok=True)
     raw_articles = fetch_news_articles(hours_back=24, limit=30)
-    market_items = build_market_rank_items(build_news_rank_items(), build_poly_rank_items())
-    story = build_card_news_v2(news_articles=raw_articles, market_items=market_items)
     top = raw_articles[0] if raw_articles else {}
-    headline = str(top.get("title", "") or "오늘 시장 핵심 뉴스")
-    source_text = str((top.get("source", {}) or {}).get("name", "Global Desk"))
-
-    ordered_card_paths = [
-        render_news_template(headline=headline, image_url=str(top.get("urlToImage", "")), source_text=source_text, out_path=os.path.join(CARD_OUT_DIR, "card_01.jpg")),
-        render_news_template(headline=str(story.get("slides", [{}, {}])[1].get("body", "핵심 포인트")), image_url=str(top.get("urlToImage", "")), source_text="핵심 포인트", out_path=os.path.join(CARD_OUT_DIR, "card_02.jpg")),
-        render_ranking_template("오늘 시장 반응 TOP10", [{"symbol": "QQQ", "label": x.get("label", "자산"), "value": f"{x.get('score', 0)}%"} for x in market_items[:10]], out_path=os.path.join(CARD_OUT_DIR, "card_03.jpg")),
-        render_stock_study_template(company_name_kr="엔비디아", ticker="NVDA", rank_text="#1", out_path=os.path.join(CARD_OUT_DIR, "card_04.jpg")),
-        render_stock_study_template(company_name_kr="저장하고 장 시작 전 확인", ticker="NVDA", rank_text="#SAVE", out_path=os.path.join(CARD_OUT_DIR, "card_05.jpg")),
+    img = str(top.get("urlToImage", ""))
+    cards = [
+        {
+            "headline": "오늘 시장을 흔든 이슈",
+            "tag": "OIL",
+            "image_url": img,
+            "prompt": "Reuters/Bloomberg documentary realism, cinematic financial news photograph, strong subject, vertical composition, no text, no watermark, no logo.",
+        },
+        {
+            "headline": "유가가 다시 움직인 이유",
+            "tag": "OIL",
+            "image_url": img,
+            "prompt": "Oil market financial news scene, Reuters style realism, strong subject, vertical composition, no text, no watermark, no logo.",
+        },
+        {
+            "headline": "비트코인이 반응한 구간",
+            "tag": "BTC",
+            "image_url": img,
+            "prompt": "Crypto market documentary realism, financial news mood, cinematic high contrast, strong subject, no text, no watermark, no logo.",
+        },
+        {
+            "headline": "금리가 만든 부담",
+            "tag": "RATE",
+            "image_url": img,
+            "prompt": "Interest-rate financial news photo, macro newsroom realism, cinematic high contrast, strong subject, no text, no watermark, no logo.",
+        },
+        {
+            "headline": "다음 시장 체크포인트",
+            "tag": "US STOCK",
+            "image_url": img,
+            "prompt": "US stock market documentary realism, business editorial, strong subject, vertical composition, no text, no watermark, no logo.",
+        },
     ]
+    ordered_card_paths = build_jadonnam_signature_cards(CARD_OUT_DIR, cards)
 
-    caption_text = "\n".join(story.get("caption_lines", [])).strip()
-    caption_path = os.path.join(CARD_OUT_DIR, "caption.txt")
-    with open(caption_path, "w", encoding="utf-8") as f:
-        f.write(caption_text + "\n")
-
-    expected_files = ordered_card_paths + [caption_path]
+    expected_files = ordered_card_paths
     for path in expected_files:
         exists = os.path.exists(path)
         print(f"[card_news_v2] output check: {path} exists={exists}")
@@ -590,12 +587,6 @@ def post_card_news_v2() -> None:
             print("[카드뉴스 v2] 저장 채널 카드 5장 전송 완료")
         else:
             print("[카드뉴스 v2] send_storage_media_group 미사용(모듈 없음)")
-
-        if send_storage_message is not None:
-            send_storage_message(f"[카드뉴스 v2 캡션]\n{caption_text}")
-            print("[카드뉴스 v2] 저장 채널 캡션 전송 완료")
-        else:
-            print("[카드뉴스 v2] send_storage_message 미사용(모듈 없음)")
     else:
         print("[카드뉴스 v2] ENABLE_TELEGRAM_STORAGE=false, 저장 채널 전송 생략")
 
@@ -623,7 +614,7 @@ def _topic_symbol(topic_slug: str) -> str:
 def post_market_fact_content() -> None:
     os.makedirs(MARKET_FACT_OUT_DIR, exist_ok=True)
     # Remove old artifacts first to avoid stale outputs.
-    for name in ("card_01.jpg", "card_02.jpg", "card_03.jpg", "card_04.jpg", "card_05.jpg", "caption.txt"):
+    for name in ("card_01.jpg", "card_02.jpg", "card_03.jpg", "card_04.jpg", "card_05.jpg"):
         p = os.path.join(MARKET_FACT_OUT_DIR, name)
         if os.path.exists(p):
             try:
@@ -665,21 +656,7 @@ def post_market_fact_content() -> None:
         render_stock_study_template(company_name_kr="저장하고 내일 재확인", ticker="NVDA", rank_text="#SAVE", out_path=os.path.join(MARKET_FACT_OUT_DIR, "card_05.jpg")),
     ]
 
-    caption_lines = [
-        f"1) 주제: {topic_title}",
-        f"2) 카테고리: {str(topic.get('category', '시장'))}",
-        "3) 오늘 시장이 먼저 반응한 핵심 포인트 정리",
-        "4) 숫자보다 구조를 먼저 보면 흐름이 보입니다",
-        "5) 내일 장 시작 전에 다시 보면 더 선명해집니다",
-        "저장해두고 다음 변동 때 비교하세요.",
-        "#경제 #경제뉴스 #미국주식 #ETF #빅테크 #비트코인 #금리 #CPI #장기투자 #투자",
-    ]
-    caption_text = "\n".join(caption_lines)
-    caption_path = os.path.join(MARKET_FACT_OUT_DIR, "caption.txt")
-    with open(caption_path, "w", encoding="utf-8") as f:
-        f.write(caption_text + "\n")
-
-    expected_files = card_paths + [caption_path]
+    expected_files = card_paths
     for path in expected_files:
         exists = os.path.exists(path)
         size = os.path.getsize(path) if exists else -1
@@ -692,51 +669,11 @@ def post_market_fact_content() -> None:
             print("[market_fact] 저장 채널 카드 5장 전송 완료")
         else:
             print("[market_fact] send_storage_media_group 미사용(모듈 없음)")
-        if send_storage_message is not None:
-            send_storage_message(f"[market_fact 캡션]\n{caption_text}")
-            print("[market_fact] 저장 채널 캡션 전송 완료")
-        else:
-            print("[market_fact] send_storage_message 미사용(모듈 없음)")
     else:
         print("[market_fact] ENABLE_TELEGRAM_STORAGE=false, 저장 채널 전송 생략")
 
     print("[market_fact] 릴스 자동화 비활성화")
     print("[market_fact] 인스타 자동업로드 비활성화")
-    mark_regular_sent()
-
-
-def post_static_reel_v1() -> None:
-    os.makedirs(STATIC_REEL_OUT_DIR, exist_ok=True)
-    for name in ("poster.jpg", "reel_output.mp4", "caption.txt"):
-        p = os.path.join(STATIC_REEL_OUT_DIR, name)
-        if os.path.exists(p):
-            try:
-                os.remove(p)
-            except Exception:
-                pass
-
-    result = build_static_reel_v1(
-        output_dir=STATIC_REEL_OUT_DIR,
-        reel_format=STATIC_REEL_FORMAT,
-        duration_sec=18.0,
-        stock_ticker=DEFAULT_STOCK_TICKER,
-    )
-    poster_path = result["poster_path"]
-    reel_path = result["reel_path"]
-
-    for path in (poster_path, reel_path):
-        print(f"[static_reel] output check: {path} exists={os.path.exists(path)} size={os.path.getsize(path) if os.path.exists(path) else -1}")
-
-    if ENABLE_TELEGRAM_STORAGE:
-        if send_storage_video is not None:
-            send_storage_video(reel_path, caption="[static_reel 영상]\noutput_static_reel/reel_output.mp4")
-            print("[static_reel] 저장 채널 reel 전송 완료 (single send)")
-        else:
-            print("[static_reel] send_storage_video 미사용(모듈 없음)")
-    else:
-        print("[static_reel] ENABLE_TELEGRAM_STORAGE=false, 저장 채널 전송 생략")
-
-    print("[static_reel] 인스타 자동업로드 비활성화")
     mark_regular_sent()
 
 
