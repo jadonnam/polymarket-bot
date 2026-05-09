@@ -62,6 +62,7 @@ DEFAULT_STOCK_TICKER = (os.getenv("DEFAULT_STOCK_TICKER") or "NVDA").strip().upp
 ENABLE_OPENAI_STATIC_IMAGE = (os.getenv("ENABLE_OPENAI_STATIC_IMAGE") or "false").lower() == "true"
 FORCE_REGENERATE_STATIC_BG = (os.getenv("FORCE_REGENERATE_STATIC_BG") or "false").lower() == "true"
 REEL_AUTOMATION_ENABLED = (os.getenv("REEL_AUTOMATION_ENABLED") or "false").lower() == "true"
+ENABLE_OPENAI_CARD_IMAGE = (os.getenv("ENABLE_OPENAI_CARD_IMAGE") or "false").lower() == "true"
 
 # 스레드 중간 포스팅 시간 (KST 시간 기준)
 THREADS_MIDDAY_HOURS = [9, 13, 17, 21]
@@ -533,6 +534,17 @@ def post_regular_rank_cards() -> None:
     mark_regular_sent()
 
 
+def _log_final_card_size(path: str) -> None:
+    if not os.path.exists(path):
+        print(f"[final_card] path={path} size=missing")
+        return
+    n = os.path.getsize(path)
+    kb = n / 1024.0
+    label = f"{kb:.0f}kb" if kb >= 100 else f"{kb:.1f}kb"
+    base = os.path.basename(path)
+    print(f"[final_card] {base} size={label}")
+
+
 def post_simple_news_cards() -> None:
     os.makedirs(CARD_OUT_DIR, exist_ok=True)
     for n in ("card_01.jpg", "card_02.jpg", "card_03.jpg", "card_04.jpg", "card_05.jpg"):
@@ -554,6 +566,13 @@ def post_simple_news_cards() -> None:
         "다음 시장 체크포인트",
     ]
     tags = ["OIL", "OIL", "BTC", "RATE", "US STOCK"]
+    image_prompts = [
+        "Reuters/Bloomberg documentary realism, cinematic financial news photograph, strong subject, vertical composition, no text, no watermark, no logo.",
+        "Oil market financial news scene, Reuters style realism, strong subject, vertical composition, no text, no watermark, no logo.",
+        "Crypto market documentary realism, financial news mood, cinematic high contrast, strong subject, no text, no watermark, no logo.",
+        "Interest-rate financial news photo, macro newsroom realism, cinematic high contrast, strong subject, no text, no watermark, no logo.",
+        "US stock market documentary realism, business editorial, strong subject, vertical composition, no text, no watermark, no logo.",
+    ]
 
     card_paths = build_simple_news_card_set(
         out_dir=CARD_OUT_DIR,
@@ -561,9 +580,11 @@ def post_simple_news_cards() -> None:
         titles=titles,
         tags=tags,
         source_label="JADONNAM",
+        image_prompts=image_prompts,
     )
     for p in card_paths:
         print(f"[simple_news_card] output check: {p} exists={os.path.exists(p)}")
+        _log_final_card_size(p)
 
     if ENABLE_TELEGRAM_STORAGE and send_storage_media_group is not None:
         send_storage_media_group(card_paths)
@@ -748,6 +769,7 @@ def main() -> None:
     print(f"[mode] STATIC_REEL_FORMAT={STATIC_REEL_FORMAT}")
     print(f"[mode] DEFAULT_STOCK_TICKER={DEFAULT_STOCK_TICKER}")
     print(f"[mode] ENABLE_OPENAI_STATIC_IMAGE={str(ENABLE_OPENAI_STATIC_IMAGE).lower()}")
+    print(f"[mode] ENABLE_OPENAI_CARD_IMAGE={str(ENABLE_OPENAI_CARD_IMAGE).lower()}")
     print(f"[mode] FORCE_REGENERATE_STATIC_BG={str(FORCE_REGENERATE_STATIC_BG).lower()}")
     print(f"[mode] resolved content mode={resolve_content_mode()}")
     print(f"[mode] selected pipeline={selected_pipeline_name()}")
