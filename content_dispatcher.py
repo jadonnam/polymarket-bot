@@ -109,6 +109,21 @@ def send_storage_image(path: str, caption: str = "") -> None:
     res.raise_for_status()
 
 
+def send_storage_document(path: str, caption: str = "") -> None:
+    _check_storage()
+    if DRY_RUN:
+        print(f"[DRY_RUN] send_storage_document: {path} | {caption[:120]}")
+        return
+    with open(path, "rb") as f:
+        res = requests.post(
+            _url("sendDocument"),
+            data={"chat_id": STORAGE_CHAT_ID, "caption": caption},
+            files={"document": f},
+            timeout=120,
+        )
+    res.raise_for_status()
+
+
 def send_storage_message(text: str) -> None:
     _check_storage()
     if DRY_RUN:

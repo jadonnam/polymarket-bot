@@ -15,11 +15,18 @@ from news_template import build_jadonnam_signature_cards
 from rank_card_v3 import create_rank_set
 from ranking_template import render_ranking_template
 from stock_study_template import render_stock_study_template
-from simple_news_card import build_simple_news_card_set
+from daily_summary_card import build_daily_summary_payload, render_daily_summary_card, write_caption_file
 
 try:
-    from content_dispatcher import send_storage_image, send_storage_media_group, send_storage_message, send_storage_video
+    from content_dispatcher import (
+        send_storage_document,
+        send_storage_image,
+        send_storage_media_group,
+        send_storage_message,
+        send_storage_video,
+    )
 except Exception:
+    send_storage_document = None
     send_storage_image = None
     send_storage_media_group = None
     send_storage_message = None
@@ -76,10 +83,7 @@ def selected_pipeline_name() -> str:
     if STATIC_REEL_MODE:
         return "disabled_static_reel"
     if CARD_NEWS_MODE:
-        mode = resolve_content_mode()
-        if mode == "market_fact":
-            return "market_fact"
-        return "card_news_v2"
+        return "daily_summary_card"
     return "card_news_only"
 
 
@@ -525,7 +529,7 @@ def post_regular_rank_cards() -> None:
         return
 
     if CARD_NEWS_MODE:
-        print("[mode] simple image-first renderer enabled")
+        print("[mode] daily single summary card enabled")
         post_simple_news_cards()
         return
 
@@ -547,7 +551,15 @@ def _log_final_card_size(path: str) -> None:
 
 def post_simple_news_cards() -> None:
     os.makedirs(CARD_OUT_DIR, exist_ok=True)
-    for n in ("card_01.jpg", "card_02.jpg", "card_03.jpg", "card_04.jpg", "card_05.jpg"):
+    for n in (
+        "card_01.jpg",
+        "card_02.jpg",
+        "card_03.jpg",
+        "card_04.jpg",
+        "card_05.jpg",
+        "daily_summary_card.jpg",
+        "caption.txt",
+    ):
         p = os.path.join(CARD_OUT_DIR, n)
         if os.path.exists(p):
             try:
@@ -555,44 +567,55 @@ def post_simple_news_cards() -> None:
             except Exception:
                 pass
 
-    raw_articles = fetch_news_articles(hours_back=24, limit=20)
-    lead = raw_articles[0] if raw_articles else {}
-    image_url = str(lead.get("urlToImage", ""))
-    titles = [
-        "오늘 시장을 흔든 이슈",
-        "유가가 다시 움직인 이유",
-        "비트코인이 반응한 구간",
-        "금리가 만든 부담",
-        "다음 시장 체크포인트",
-    ]
-    tags = ["OIL", "OIL", "BTC", "RATE", "US STOCK"]
-    image_prompts = [
-        "Reuters/Bloomberg documentary realism, cinematic financial news photograph, strong subject, vertical composition, no text, no watermark, no logo.",
-        "Oil market financial news scene, Reuters style realism, strong subject, vertical composition, no text, no watermark, no logo.",
-        "Crypto market documentary realism, financial news mood, cinematic high contrast, strong subject, no text, no watermark, no logo.",
-        "Interest-rate financial news photo, macro newsroom realism, cinematic high contrast, strong subject, no text, no watermark, no logo.",
-        "US stock market documentary realism, business editorial, strong subject, vertical composition, no text, no watermark, no logo.",
-    ]
+    raw_articles = fetch_news_articles(hours_back=24, limit=24)
+    rank_items = build_news_rank_items()
+    rank_labels = [str(x.get("label", "")).strip() for x in rank_items[:4] if x.get("label")]
 
-    card_paths = build_simple_news_card_set(
-        out_dir=CARD_OUT_DIR,
-        image_url=image_url,
-        titles=titles,
-        tags=tags,
-        source_label="JADONNAM",
-        image_prompts=image_prompts,
+    payload = build_daily_summary_payload(
+        raw_articles,
+        rank_labels=rank_labels,
+        date_line=generated_at_text(),
+        title="오늘의 시장 요약",
     )
-    for p in card_paths:
-        print(f"[simple_news_card] output check: {p} exists={os.path.exists(p)}")
-        _log_final_card_size(p)
+    out_jpg = os.path.join(CARD_OUT_DIR, "daily_summary_card.jpg")
+    caption_path = os.path.join(CARD_OUT_DIR, "caption.txt")
 
-    if ENABLE_TELEGRAM_STORAGE and send_storage_media_group is not None:
-        send_storage_media_group(card_paths)
-        print("[simple_news_card] 저장 채널 카드 5장 전송 완료")
+    render_daily_summary_card(out_jpg, payload, raw_articles)
+    write_caption_file(caption_path, payload)
+
+    print(f"[daily_summary] output check: {out_jpg} exists={os.path.exists(out_jpg)}")
+    _log_final_card_size(out_jpg)
+    cp_ok = os.path.exists(caption_path)
+    print(f"[daily_summary] caption check: {caption_path} exists={cp_ok}")
+    if cp_ok:
+        sz = os.path.getsize(caption_path)
+        print(f"[daily_summary] caption_size={sz} bytes")
+
+    if ENABLE_TELEGRAM_STORAGE:
+        if send_storage_image is not None:
+            send_storage_image(out_jpg, caption="")
+            print("[daily_summary] 저장 채널 요약 카드 1장 전송")
+        else:
+            print("[daily_summary] send_storage_image 없음")
+        if send_storage_document is not None and cp_ok:
+            send_storage_document(caption_path, caption="daily summary caption")
+            print("[daily_summary] 저장 채널 캡션(txt) 전송")
+        elif cp_ok:
+            txt = ""
+            try:
+                with open(caption_path, "r", encoding="utf-8") as f:
+                    txt = f.read()
+            except Exception as e:
+                print(f"[daily_summary] caption read failed: {repr(e)}")
+            if txt and send_storage_message is not None:
+                chunk = 3800
+                for i in range(0, len(txt), chunk):
+                    send_storage_message(txt[i : i + chunk])
+                print("[daily_summary] 저장 채널 캡션 메시지 전송(분할)")
     else:
-        print("[simple_news_card] 저장 채널 전송 생략")
+        print("[daily_summary] ENABLE_TELEGRAM_STORAGE=false 전송 생략")
 
-    print("[simple_news_card] caption/reel/instagram upload disabled")
+    print("[daily_summary] reel/instagram upload disabled")
     mark_regular_sent()
 
 
