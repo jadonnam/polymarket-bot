@@ -15,6 +15,7 @@ from news_template import build_jadonnam_signature_cards
 from rank_card_v3 import create_rank_set
 from ranking_template import render_ranking_template
 from stock_study_template import render_stock_study_template
+from simple_news_card import build_simple_news_card_set
 
 try:
     from content_dispatcher import send_storage_image, send_storage_media_group, send_storage_message, send_storage_video
@@ -523,17 +524,54 @@ def post_regular_rank_cards() -> None:
         return
 
     if CARD_NEWS_MODE:
-        content_mode = resolve_content_mode()
-        print(f"[mode] CONTENT_MODE={CONTENT_MODE}")
-        print(f"[mode] resolved content mode={content_mode}")
-        if content_mode == "market_fact":
-            post_market_fact_content()
-        else:
-            post_card_news_v2()
+        print("[mode] simple image-first renderer enabled")
+        post_simple_news_cards()
         return
 
     # Non-card-news mode is intentionally disabled.
     print("[policy] CARD_NEWS_MODE=false 경로 비활성화")
+    mark_regular_sent()
+
+
+def post_simple_news_cards() -> None:
+    os.makedirs(CARD_OUT_DIR, exist_ok=True)
+    for n in ("card_01.jpg", "card_02.jpg", "card_03.jpg", "card_04.jpg", "card_05.jpg"):
+        p = os.path.join(CARD_OUT_DIR, n)
+        if os.path.exists(p):
+            try:
+                os.remove(p)
+            except Exception:
+                pass
+
+    raw_articles = fetch_news_articles(hours_back=24, limit=20)
+    lead = raw_articles[0] if raw_articles else {}
+    image_url = str(lead.get("urlToImage", ""))
+    titles = [
+        "오늘 시장을 흔든 이슈",
+        "유가가 다시 움직인 이유",
+        "비트코인이 반응한 구간",
+        "금리가 만든 부담",
+        "다음 시장 체크포인트",
+    ]
+    tags = ["OIL", "OIL", "BTC", "RATE", "US STOCK"]
+
+    card_paths = build_simple_news_card_set(
+        out_dir=CARD_OUT_DIR,
+        image_url=image_url,
+        titles=titles,
+        tags=tags,
+        source_label="JADONNAM",
+    )
+    for p in card_paths:
+        print(f"[simple_news_card] output check: {p} exists={os.path.exists(p)}")
+
+    if ENABLE_TELEGRAM_STORAGE and send_storage_media_group is not None:
+        send_storage_media_group(card_paths)
+        print("[simple_news_card] 저장 채널 카드 5장 전송 완료")
+    else:
+        print("[simple_news_card] 저장 채널 전송 생략")
+
+    print("[simple_news_card] caption/reel/instagram upload disabled")
     mark_regular_sent()
 
 
