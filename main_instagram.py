@@ -12,13 +12,16 @@ from card_news_v2 import build_card_news_v2
 from card_v3 import create_breaking_image
 from editorial_renderer import render_card_news_v2
 from market_fact_cards import build_market_fact_cards
+from news_template import render_news_template
 from rank_card_v3 import create_rank_set
+from ranking_template import render_ranking_template
 from reel_pack_v2 import build_reel_pack_v2
 from reels_maker_final import build_reel
 from reels_packager import build_content_pack
 from reel_story_v2 import build_reel_story_v2
 from renderer_v2 import render_reel_story_v2
 from static_reel_v1 import build_static_reel_v1
+from stock_study_template import render_stock_study_template
 
 try:
     from content_dispatcher import send_storage_image, send_storage_media_group, send_storage_message, send_storage_video
@@ -64,6 +67,7 @@ STATIC_REEL_FORMAT = (os.getenv("STATIC_REEL_FORMAT") or "stock_study").strip().
 DEFAULT_STOCK_TICKER = (os.getenv("DEFAULT_STOCK_TICKER") or "NVDA").strip().upper()
 ENABLE_OPENAI_STATIC_IMAGE = (os.getenv("ENABLE_OPENAI_STATIC_IMAGE") or "false").lower() == "true"
 FORCE_REGENERATE_STATIC_BG = (os.getenv("FORCE_REGENERATE_STATIC_BG") or "false").lower() == "true"
+REEL_AUTOMATION_ENABLED = (os.getenv("REEL_AUTOMATION_ENABLED") or "false").lower() == "true"
 
 # 스레드 중간 포스팅 시간 (KST 시간 기준)
 THREADS_MIDDAY_HOURS = [9, 13, 17, 21]
@@ -524,8 +528,7 @@ def post_regular_rank_cards() -> None:
     print(f"[mode] USE_REEL_STORY_V2={str(USE_REEL_STORY_V2).lower()}")
     print(f"[mode] selected pipeline={selected_pipeline_name()}")
     if STATIC_REEL_MODE:
-        print(f"[mode] STATIC_REEL_FORMAT={STATIC_REEL_FORMAT}")
-        post_static_reel_v1()
+        print("[static_reel] disabled by policy: focus on saved card news")
         return
 
     if CARD_NEWS_MODE:
@@ -545,38 +548,13 @@ def post_regular_rank_cards() -> None:
     save_score_history(history)
 
     paths = create_rank_set(news_items, poly_items, market_items, out_dir=OUT_DIR, generated_at_text=generated_at_text())
-    pack = build_content_pack(news_items, poly_items, market_items)
-
-    if USE_REEL_STORY_V2:
-        raw_articles = fetch_news_articles(hours_back=24, limit=30)
-        story = build_reel_story_v2(news_items, poly_items, market_items, raw_articles=raw_articles)
-        reel_path = render_reel_story_v2(story, os.path.join(OUT_DIR, "reel_output.mp4"))
-        if story.get("meta", {}).get("reel_caption"):
-            pack["reel_caption"] = story["meta"]["reel_caption"]
-        if story.get("meta", {}).get("reel_hook"):
-            pack["reel_hook"] = story["meta"]["reel_hook"]
-        if story.get("meta", {}).get("hashtags"):
-            pack["hashtags"] = story["meta"]["hashtags"]
+    if ENABLE_TELEGRAM_STORAGE and send_storage_media_group is not None:
+        send_storage_media_group(paths)
+        print("[정규 카드] 저장 채널 카드 전송 완료")
     else:
-        top_labels = [news_items[0]["label"], poly_items[0]["label"], market_items[0]["label"]]
-        reel_path = build_reel(paths[0], paths[1], paths[2], pack["reel_hook"], os.path.join(OUT_DIR, "reel_output.mp4"), top_labels=top_labels)
-    print(f"[릴스 생성 완료] path={reel_path}")
-    if ENABLE_TELEGRAM_STORAGE:
-        if send_storage_video is not None:
-            try:
-                send_storage_video(reel_path, caption="[릴스 생성 완료]\noutput_rank/reel_output.mp4")
-                print("[텔레그램 저장 채널 업로드 완료]")
-            except Exception as e:
-                print(f"[텔레그램 저장 채널 업로드 오류] {repr(e)}")
-        else:
-            print("[텔레그램 저장 채널] send_storage_video 미사용(모듈 없음)")
-    else:
-        print("[텔레그램 저장 채널 업로드 비활성화]")
-
-    print("[인스타 업로드 비활성화] 릴스 파일만 생성됨")
-
+        print("[정규 카드] 저장 채널 전송 생략")
+    print("[정규 카드] 릴스 자동화 비활성화")
     mark_regular_sent()
-    print("[정규 파이프라인] 릴스 생성 완료 / 텔레그램 저장 채널 전송")
 
 
 def post_card_news_v2() -> None:
@@ -584,40 +562,24 @@ def post_card_news_v2() -> None:
     raw_articles = fetch_news_articles(hours_back=24, limit=30)
     market_items = build_market_rank_items(build_news_rank_items(), build_poly_rank_items())
     story = build_card_news_v2(news_articles=raw_articles, market_items=market_items)
-    card_paths_raw = render_card_news_v2(story, out_dir=CARD_OUT_DIR)
+    top = raw_articles[0] if raw_articles else {}
+    headline = str(top.get("title", "") or "오늘 시장 핵심 뉴스")
+    source_text = str((top.get("source", {}) or {}).get("name", "Global Desk"))
 
-    ordered_card_paths: List[str] = []
-    for idx, p in enumerate(card_paths_raw[:5], start=1):
-        target = os.path.join(CARD_OUT_DIR, f"card_{idx:02d}.jpg")
-        if os.path.abspath(p) != os.path.abspath(target):
-            try:
-                import shutil
-                shutil.copyfile(p, target)
-            except Exception:
-                target = p
-        ordered_card_paths.append(target)
+    ordered_card_paths = [
+        render_news_template(headline=headline, image_url=str(top.get("urlToImage", "")), source_text=source_text, out_path=os.path.join(CARD_OUT_DIR, "card_01.jpg")),
+        render_news_template(headline=str(story.get("slides", [{}, {}])[1].get("body", "핵심 포인트")), image_url=str(top.get("urlToImage", "")), source_text="핵심 포인트", out_path=os.path.join(CARD_OUT_DIR, "card_02.jpg")),
+        render_ranking_template("오늘 시장 반응 TOP10", [{"symbol": "QQQ", "label": x.get("label", "자산"), "value": f"{x.get('score', 0)}%"} for x in market_items[:10]], out_path=os.path.join(CARD_OUT_DIR, "card_03.jpg")),
+        render_stock_study_template(company_name_kr="엔비디아", ticker="NVDA", rank_text="#1", out_path=os.path.join(CARD_OUT_DIR, "card_04.jpg")),
+        render_stock_study_template(company_name_kr="저장하고 장 시작 전 확인", ticker="NVDA", rank_text="#SAVE", out_path=os.path.join(CARD_OUT_DIR, "card_05.jpg")),
+    ]
 
-    reel_path = build_reel_pack_v2(
-        ordered_card_paths,
-        out_path=os.path.join(CARD_OUT_DIR, "reel_output.mp4"),
-        per_card_sec=3.8,
-    )
-
-    caption_text = (
-        "\n".join(story.get("caption_lines", [])).strip()
-        if story.get("caption_lines")
-        else (
-            f"{story.get('caption', '')}\n\n"
-            f"{story.get('save_cta', '')}\n"
-            f"{story.get('share_cta', '')}\n\n"
-            f"{story.get('hashtags', '')}\n"
-        ).strip()
-    )
+    caption_text = "\n".join(story.get("caption_lines", [])).strip()
     caption_path = os.path.join(CARD_OUT_DIR, "caption.txt")
     with open(caption_path, "w", encoding="utf-8") as f:
         f.write(caption_text + "\n")
 
-    expected_files = ordered_card_paths + [reel_path, caption_path]
+    expected_files = ordered_card_paths + [caption_path]
     for path in expected_files:
         exists = os.path.exists(path)
         print(f"[card_news_v2] output check: {path} exists={exists}")
@@ -629,12 +591,6 @@ def post_card_news_v2() -> None:
         else:
             print("[카드뉴스 v2] send_storage_media_group 미사용(모듈 없음)")
 
-        if send_storage_video is not None:
-            send_storage_video(reel_path, caption="[카드뉴스 v2 릴스]\noutput_cardnews/reel_output.mp4")
-            print("[카드뉴스 v2] 저장 채널 릴스 전송 완료")
-        else:
-            print("[카드뉴스 v2] send_storage_video 미사용(모듈 없음)")
-
         if send_storage_message is not None:
             send_storage_message(f"[카드뉴스 v2 캡션]\n{caption_text}")
             print("[카드뉴스 v2] 저장 채널 캡션 전송 완료")
@@ -643,7 +599,7 @@ def post_card_news_v2() -> None:
     else:
         print("[카드뉴스 v2] ENABLE_TELEGRAM_STORAGE=false, 저장 채널 전송 생략")
 
-    # Instagram auto-upload is intentionally disabled in card-news mode.
+    print("[카드뉴스 v2] 릴스 자동화 비활성화")
     print("[카드뉴스 v2] 인스타 자동업로드 비활성화")
     mark_regular_sent()
 
@@ -667,7 +623,7 @@ def _topic_symbol(topic_slug: str) -> str:
 def post_market_fact_content() -> None:
     os.makedirs(MARKET_FACT_OUT_DIR, exist_ok=True)
     # Remove old artifacts first to avoid stale outputs.
-    for name in ("card_01.jpg", "card_02.jpg", "card_03.jpg", "card_04.jpg", "card_05.jpg", "reel_output.mp4", "caption.txt"):
+    for name in ("card_01.jpg", "card_02.jpg", "card_03.jpg", "card_04.jpg", "card_05.jpg", "caption.txt"):
         p = os.path.join(MARKET_FACT_OUT_DIR, name)
         if os.path.exists(p):
             try:
@@ -697,15 +653,17 @@ def post_market_fact_content() -> None:
         "한 줄 결론: 저장 후 비교",
     ]
 
-    pack = {
-        "title": topic_title,
-        "symbol": _topic_symbol(topic_slug),
-        "image_urls": image_urls,
-        "bullets": bullets,
-    }
-    print("[market_fact] builder function=market_fact_cards.build_market_fact_cards")
-    card_paths = build_market_fact_cards(pack, out_dir=MARKET_FACT_OUT_DIR)
-    reel_path = build_reel_pack_v2(card_paths, out_path=os.path.join(MARKET_FACT_OUT_DIR, "reel_output.mp4"), per_card_sec=3.8)
+    rank_rows = []
+    for idx, it in enumerate(build_market_rank_items(build_news_rank_items(), build_poly_rank_items())[:10], start=1):
+        rank_rows.append({"symbol": "QQQ", "label": it.get("label", f"자산 {idx}"), "value": f"{it.get('score', 0)}%"})
+
+    card_paths = [
+        render_stock_study_template(company_name_kr="엔비디아", ticker="NVDA", rank_text="#1", out_path=os.path.join(MARKET_FACT_OUT_DIR, "card_01.jpg")),
+        render_ranking_template("ETF 수익률 TOP10", rank_rows, out_path=os.path.join(MARKET_FACT_OUT_DIR, "card_02.jpg")),
+        render_ranking_template("반도체 수익률 TOP10", rank_rows, out_path=os.path.join(MARKET_FACT_OUT_DIR, "card_03.jpg")),
+        render_ranking_template("AI 기업 비교 TOP10", rank_rows, out_path=os.path.join(MARKET_FACT_OUT_DIR, "card_04.jpg")),
+        render_stock_study_template(company_name_kr="저장하고 내일 재확인", ticker="NVDA", rank_text="#SAVE", out_path=os.path.join(MARKET_FACT_OUT_DIR, "card_05.jpg")),
+    ]
 
     caption_lines = [
         f"1) 주제: {topic_title}",
@@ -721,7 +679,7 @@ def post_market_fact_content() -> None:
     with open(caption_path, "w", encoding="utf-8") as f:
         f.write(caption_text + "\n")
 
-    expected_files = card_paths + [reel_path, caption_path]
+    expected_files = card_paths + [caption_path]
     for path in expected_files:
         exists = os.path.exists(path)
         size = os.path.getsize(path) if exists else -1
@@ -734,11 +692,6 @@ def post_market_fact_content() -> None:
             print("[market_fact] 저장 채널 카드 5장 전송 완료")
         else:
             print("[market_fact] send_storage_media_group 미사용(모듈 없음)")
-        if send_storage_video is not None:
-            send_storage_video(reel_path, caption="[market_fact 릴스]\noutput_marketfact/reel_output.mp4")
-            print("[market_fact] 저장 채널 릴스 전송 완료")
-        else:
-            print("[market_fact] send_storage_video 미사용(모듈 없음)")
         if send_storage_message is not None:
             send_storage_message(f"[market_fact 캡션]\n{caption_text}")
             print("[market_fact] 저장 채널 캡션 전송 완료")
@@ -747,6 +700,7 @@ def post_market_fact_content() -> None:
     else:
         print("[market_fact] ENABLE_TELEGRAM_STORAGE=false, 저장 채널 전송 생략")
 
+    print("[market_fact] 릴스 자동화 비활성화")
     print("[market_fact] 인스타 자동업로드 비활성화")
     mark_regular_sent()
 

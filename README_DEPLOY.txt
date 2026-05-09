@@ -1,81 +1,46 @@
-자돈남 최종 배포 체크리스트
+카드뉴스 전용 자동화 배포 가이드
 
-1) 네가 직접 넣어야 하는 파일
-- 없음 (인스타 세션 파일 미사용)
+최종 정책:
+- 릴스 자동화 중단
+- 카드뉴스 자동 생성만 운영
+- Telegram 저장 채널로 카드 5장 + 캡션만 전송
+- 인스타 자동업로드 없음
+- OpenAI 이미지 생성 없음
+- 템플릿 고정 + 데이터만 변경
 
-2) Railway Variables에 넣어야 하는 값
-- NEWS_API_KEY
+1) Railway Variables (필수)
+- CHECK_INTERVAL=1800
+- CARD_NEWS_MODE=true
+- CONTENT_MODE=market_fact
+- ENABLE_TELEGRAM_STORAGE=true
 - TELEGRAM_BOT_TOKEN
 - TELEGRAM_STORAGE_CHAT_ID
-- ENABLE_TELEGRAM_STORAGE=true
-- CARD_NEWS_MODE=true
-- USE_REEL_STORY_V2=false
-- CONTENT_MODE=market_fact
-- STATIC_REEL_MODE=true
-- STATIC_REEL_FORMAT=stock_study  # stock_study | ranking
 - FORCE_REGULAR_NOW=false
-- CHECK_INTERVAL=1800
-- DRY_RUN_PIPELINE=false
 - SKIP_BREAKING_CHECK=true
-- USE_CACHED_NEWS=true
-- ENABLE_OPENAI_IMAGE=false
 
-3) 배포 전 확인
-- fonts/Pretendard-Bold.ttf 존재
-- fonts/Pretendard-Regular.ttf 존재
-- Procfile이 worker: python main_instagram.py 인지 확인
+2) Deprecated / 미사용 변수 (현재 정책에서 사용 안 함)
+- STATIC_REEL_MODE
+- STATIC_REEL_FORMAT
+- ENABLE_INSTAGRAM_UPLOAD
+- ENABLE_OPENAI_IMAGE
+- ENABLE_OPENAI_STATIC_IMAGE
+- FORCE_REGENERATE_STATIC_BG
+- OPENAI_API_KEY
+- USE_REEL_STORY_V2
+- USE_CACHED_NEWS
+- SKIP_POLYMARKET
 
-4) 테스트 순서
-- Railway Variables에서 FORCE_REGULAR_NOW=true 로 1회 테스트
-- 실행 로그에서 카드뉴스 5장 + 무음 릴스 생성 확인
-- 생성 파일 확인:
-  - STATIC_REEL_MODE=true:
-    - output_static_reel/poster.jpg
-    - output_static_reel/reel_output.mp4
-    - output_static_reel/caption.txt
-  - CONTENT_MODE=briefing:
-    - output_cardnews/card_01.jpg ~ card_05.jpg
-    - output_cardnews/reel_output.mp4
-    - output_cardnews/caption.txt
-  - CONTENT_MODE=market_fact:
-    - output_marketfact/card_01.jpg ~ card_05.jpg
-    - output_marketfact/reel_output.mp4
-    - output_marketfact/caption.txt
-- 텔레그램 저장 채널 전송 확인:
-  - STATIC_REEL_MODE=true:
-    - poster.jpg
-    - reel_output.mp4
-    - caption 텍스트 메시지
-  - STATIC_REEL_MODE=false:
-    - 카드 5장 media group
-    - 릴스 mp4
-    - caption 텍스트 메시지
-- 테스트 후 FORCE_REGULAR_NOW=false 로 원복
+3) 생성물
+- briefing 모드: `output_cardnews/card_01.jpg` ~ `card_05.jpg`, `caption.txt`
+- market_fact 모드: `output_marketfact/card_01.jpg` ~ `card_05.jpg`, `caption.txt`
 
-5) Git 명령어
-이미 git 연결 안 되어 있으면:
-git init
-git add .
-git commit -m "final deploy setup"
-git branch -M main
-git remote add origin <깃허브 레포 주소>
-git push -u origin main
+4) 전송 정책
+- 저장 채널 전송만 허용
+  - 카드 5장 media group
+  - caption 텍스트 메시지
+- 정보방 전송 금지
+- 릴스/인스타 자동 업로드 금지
 
-이미 git 연결되어 있으면:
-git add .
-git commit -m "final deploy update"
-git push origin main
-
-6) 현재 코드 동작 요약
-- 30분마다 실행 권장
-- 속보: 기본 비활성화(SKIP_BREAKING_CHECK=true)
-- 정규시간(08:10, 19:10 KST):
-  - STATIC_REEL_MODE=true: 고정형 정보 이미지 릴스(18초 무음) 생성
-  - CARD_NEWS_MODE=true + CONTENT_MODE=briefing: 브리핑형 카드뉴스 생성
-  - CARD_NEWS_MODE=true + CONTENT_MODE=market_fact: 정보형 저장 콘텐츠 생성
-  - CARD_NEWS_MODE=false: 기존 저비용 TOP5 구조 유지
-- 전송 대상: 비공개 Telegram 저장 채널 전용(정보방/인스타 자동업로드 비활성화)
-
-운영 스케줄 제안:
-- 08:10 KST: CONTENT_MODE=briefing
-- 19:10 KST: CONTENT_MODE=market_fact
+5) 운영 스케줄 제안
+- 08:10 KST: `CONTENT_MODE=briefing` (간단 시장 브리핑)
+- 19:10 KST: `CONTENT_MODE=market_fact` (저장형 정보 콘텐츠)
