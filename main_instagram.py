@@ -630,7 +630,7 @@ def post_simple_news_cards() -> None:
         preferred_keywords=background_keywords_for_mode(summary_mode),
     )
     hook_h = str(carousel.get("hook_headline", ""))
-    caption_text = build_carousel_caption_text(payload, hook_h)
+    caption_text = build_carousel_caption_text(payload, hook_h, raw_articles)
     try:
         os.makedirs(os.path.dirname(caption_path) or ".", exist_ok=True)
         with open(caption_path, "w", encoding="utf-8") as f:
