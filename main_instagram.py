@@ -15,7 +15,15 @@ from news_template import build_jadonnam_signature_cards
 from rank_card_v3 import create_rank_set
 from ranking_template import render_ranking_template
 from stock_study_template import render_stock_study_template
-from daily_summary_card import build_daily_summary_payload, render_daily_summary_card, write_caption_file
+from daily_summary_card import (
+    background_keywords_for_mode,
+    build_caption_text,
+    build_daily_summary_payload_auto,
+    fetch_market_data_bundle,
+    render_daily_summary_card,
+    write_caption_file,
+    write_debug_payload_json,
+)
 
 try:
     from content_dispatcher import (
@@ -70,6 +78,7 @@ ENABLE_OPENAI_STATIC_IMAGE = (os.getenv("ENABLE_OPENAI_STATIC_IMAGE") or "false"
 FORCE_REGENERATE_STATIC_BG = (os.getenv("FORCE_REGENERATE_STATIC_BG") or "false").lower() == "true"
 REEL_AUTOMATION_ENABLED = (os.getenv("REEL_AUTOMATION_ENABLED") or "false").lower() == "true"
 ENABLE_OPENAI_CARD_IMAGE = (os.getenv("ENABLE_OPENAI_CARD_IMAGE") or "false").lower() == "true"
+FORCE_CARD_TEST = (os.getenv("FORCE_CARD_TEST") or "false").lower() == "true"
 
 # 스레드 중간 포스팅 시간 (KST 시간 기준)
 THREADS_MIDDAY_HOURS = [9, 13, 17, 21]
@@ -559,6 +568,7 @@ def post_simple_news_cards() -> None:
         "card_05.jpg",
         "daily_summary_card.jpg",
         "caption.txt",
+        "debug_payload.json",
     ):
         p = os.path.join(CARD_OUT_DIR, n)
         if os.path.exists(p):
@@ -568,20 +578,80 @@ def post_simple_news_cards() -> None:
                 pass
 
     raw_articles = fetch_news_articles(hours_back=24, limit=24)
+    try:
+        market_data = fetch_market_data_bundle()
+    except Exception as e:
+        print(f"[market_data] bundle fetch exception: {repr(e)}")
+        market_data = {
+            "quotes": {},
+            "korea": {},
+            "trading_top5": ["거래대금 TOP: 데이터 수집 중", "상위 종목: 반도체/AI 중심"],
+            "sector_top5": ["AI·반도체", "에너지", "전력 인프라", "빅테크", "방산·원자재"],
+            "data_source_status": {"_bundle": "exception -> fallback"},
+        }
     rank_items = build_news_rank_items()
     rank_labels = [str(x.get("label", "")).strip() for x in rank_items[:4] if x.get("label")]
 
-    payload = build_daily_summary_payload(
-        raw_articles,
+    _card_modes = ("korea_close", "us_preopen", "macro_issue", "company_focus", "sector_focus")
+    summary_mode = "macro_issue"
+    if FORCE_CARD_TEST:
+        cm = (os.getenv("CONTENT_MODE") or "macro_issue").strip().lower()
+        if cm in _card_modes:
+            summary_mode = cm
+        else:
+            summary_mode = "macro_issue"
+        print(f"[card_test] resolved card content_mode={summary_mode} (from CONTENT_MODE={cm})")
+    else:
+        slot = current_regular_slot()
+        if slot == "morning":
+            summary_mode = "us_preopen"
+        elif slot == "evening":
+            summary_mode = "korea_close"
+        elif CONTENT_MODE in _card_modes:
+            summary_mode = CONTENT_MODE
+
+    print(f"[daily_summary] content_mode={summary_mode}")
+    payload = build_daily_summary_payload_auto(
+        articles=raw_articles,
         rank_labels=rank_labels,
         date_line=generated_at_text(),
-        title="오늘의 시장 요약",
+        content_mode=summary_mode,
+        market_data=market_data,
     )
     out_jpg = os.path.join(CARD_OUT_DIR, "daily_summary_card.jpg")
     caption_path = os.path.join(CARD_OUT_DIR, "caption.txt")
 
-    render_daily_summary_card(out_jpg, payload, raw_articles)
-    write_caption_file(caption_path, payload)
+    render_daily_summary_card(
+        out_jpg,
+        payload,
+        raw_articles,
+        preferred_background_keywords=background_keywords_for_mode(summary_mode),
+    )
+    try:
+        write_caption_file(caption_path, payload)
+    except Exception as e:
+        print(f"[daily_summary] caption write failed: {repr(e)}")
+    caption_text = build_caption_text(payload)
+
+    debug_path = os.path.join(CARD_OUT_DIR, "debug_payload.json")
+    write_debug_payload_json(
+        debug_path,
+        content_mode=summary_mode,
+        payload=payload,
+        caption=caption_text,
+        market_data=market_data,
+    )
+
+    try:
+        print(f"[card_build] content_mode={summary_mode}")
+        print(f"[card_build] money_flow={payload.flow_line}")
+        for ln in payload.number_lines:
+            print(f"[card_build] metric_line={ln}")
+        print(f"[card_build] out_jpg={out_jpg}")
+        print(f"[card_build] out_caption={caption_path}")
+        print(f"[card_build] out_debug={debug_path}")
+    except Exception as e:
+        print(f"[card_build] log failed: {repr(e)}")
 
     print(f"[daily_summary] output check: {out_jpg} exists={os.path.exists(out_jpg)}")
     _log_final_card_size(out_jpg)
@@ -616,7 +686,10 @@ def post_simple_news_cards() -> None:
         print("[daily_summary] ENABLE_TELEGRAM_STORAGE=false 전송 생략")
 
     print("[daily_summary] reel/instagram upload disabled")
-    mark_regular_sent()
+    if not FORCE_CARD_TEST:
+        mark_regular_sent()
+    else:
+        print("[card_test] mark_regular_sent 스킵 (FORCE_CARD_TEST)")
 
 
 def post_card_news_v2() -> None:
@@ -793,6 +866,7 @@ def main() -> None:
     print(f"[mode] DEFAULT_STOCK_TICKER={DEFAULT_STOCK_TICKER}")
     print(f"[mode] ENABLE_OPENAI_STATIC_IMAGE={str(ENABLE_OPENAI_STATIC_IMAGE).lower()}")
     print(f"[mode] ENABLE_OPENAI_CARD_IMAGE={str(ENABLE_OPENAI_CARD_IMAGE).lower()}")
+    print(f"[mode] FORCE_CARD_TEST={str(FORCE_CARD_TEST).lower()}")
     print(f"[mode] FORCE_REGENERATE_STATIC_BG={str(FORCE_REGENERATE_STATIC_BG).lower()}")
     print(f"[mode] resolved content mode={resolve_content_mode()}")
     print(f"[mode] selected pipeline={selected_pipeline_name()}")
@@ -818,10 +892,13 @@ def main() -> None:
         except Exception as e:
             print("[속보 처리 오류]", repr(e))
 
-    # 정규 업로드 (08:10 / 19:10 KST)
+    # 정규 업로드 (08:10 / 19:10 KST) + 카드 즉시 테스트
     try:
         print("[정규 업로드 체크 시작]")
-        if should_run_regular_post():
+        if CARD_NEWS_MODE and FORCE_CARD_TEST:
+            print("[card_test] FORCE_CARD_TEST=true — 슬롯 무시, CONTENT_MODE 기준 즉시 카드 생성")
+            post_simple_news_cards()
+        elif should_run_regular_post():
             if already_sent_regular():
                 print("[정규 업로드 스킵] 이미 전송됨")
             else:
@@ -830,8 +907,8 @@ def main() -> None:
         else:
             print("[정규 업로드 시간 아님]")
     except Exception as e:
+        # 카드/정규 경로 실패 시에도 워커는 계속 (스레드 등 후속 플로우 유지)
         print("[정규 업로드 오류]", repr(e))
-        raise
 
     # 스레드 중간 포스팅 (09 / 13 / 17 / 21시)
     try:
