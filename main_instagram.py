@@ -16,26 +16,21 @@ from rank_card_v3 import create_rank_set
 from ranking_template import render_ranking_template
 from stock_study_template import render_stock_study_template
 from daily_summary_card import (
-    background_keywords_for_mode,
     build_daily_summary_payload_auto,
     fetch_market_data_bundle,
     write_debug_payload_json,
 )
-from money_flow_card_system import build_carousel_caption_text, generate_money_flow_carousel
+from telegram_curation import build_market_briefing_text
 
 try:
     from content_dispatcher import (
-        send_storage_document,
-        send_storage_image,
-        send_storage_media_group,
         send_storage_message,
+        send_storage_text,
         send_storage_video,
     )
 except Exception:
-    send_storage_document = None
-    send_storage_image = None
-    send_storage_media_group = None
     send_storage_message = None
+    send_storage_text = None
     send_storage_video = None
 
 try:
@@ -53,6 +48,7 @@ SCORE_HISTORY_FILE = "score_history.json"
 THREADS_MIDDAY_STATE_FILE = "threads_midday_state.json"
 OUT_DIR = "output_rank"
 CARD_OUT_DIR = "output_cardnews"
+BRIEF_OUT_DIR = "output_briefing"
 MARKET_FACT_OUT_DIR = "output_marketfact"
 STATIC_REEL_OUT_DIR = "output_static_reel"
 
@@ -77,6 +73,7 @@ FORCE_REGENERATE_STATIC_BG = (os.getenv("FORCE_REGENERATE_STATIC_BG") or "false"
 REEL_AUTOMATION_ENABLED = (os.getenv("REEL_AUTOMATION_ENABLED") or "false").lower() == "true"
 ENABLE_OPENAI_CARD_IMAGE = (os.getenv("ENABLE_OPENAI_CARD_IMAGE") or "false").lower() == "true"
 FORCE_CARD_TEST = (os.getenv("FORCE_CARD_TEST") or "false").lower() == "true"
+TEXT_BRIEFING_ONLY = (os.getenv("TEXT_BRIEFING_ONLY") or "true").lower() == "true"
 
 # 스레드 중간 포스팅 시간 (KST 시간 기준)
 THREADS_MIDDAY_HOURS = [9, 13, 17, 21]
@@ -87,6 +84,9 @@ def now_kst() -> datetime:
 
 
 def selected_pipeline_name() -> str:
+    # TEXT_BRIEFING_ONLY는 CARD_NEWS_MODE와 무관하게 최우선 적용
+    if TEXT_BRIEFING_ONLY:
+        return "text_market_briefing"
     if STATIC_REEL_MODE:
         return "disabled_static_reel"
     if CARD_NEWS_MODE:
@@ -531,13 +531,17 @@ def post_regular_rank_cards() -> None:
     print(f"[mode] CARD_NEWS_MODE={str(CARD_NEWS_MODE).lower()}")
     print(f"[mode] USE_REEL_STORY_V2={str(USE_REEL_STORY_V2).lower()}")
     print(f"[mode] selected pipeline={selected_pipeline_name()}")
+    print(f"[selected_pipeline] {selected_pipeline_name()}")
     if STATIC_REEL_MODE:
         print("[static_reel] disabled by policy: focus on saved card news")
         return
 
     if CARD_NEWS_MODE:
         print("[mode] daily single summary card enabled")
-        post_simple_news_cards()
+        if TEXT_BRIEFING_ONLY:
+            run_text_market_briefing_only()
+        else:
+            post_simple_news_cards()
         return
 
     # Non-card-news mode is intentionally disabled.
@@ -556,7 +560,123 @@ def _log_final_card_size(path: str) -> None:
     print(f"[final_card] {base} size={label}")
 
 
+def _briefing_fetch_build_write_send(
+    *,
+    delivery: str,
+) -> Tuple[Any, str, List[Dict[str, Any]], Dict[str, Any], bool]:
+    """Fetch, build briefing text, write files, send Telegram. No carousel, no mark_regular_sent."""
+    os.makedirs(BRIEF_OUT_DIR, exist_ok=True)
+    raw_articles = fetch_news_articles(hours_back=24, limit=24)
+    try:
+        market_data = fetch_market_data_bundle()
+    except Exception as e:
+        print(f"[market_data] bundle fetch exception: {repr(e)}")
+        market_data = {
+            "quotes": {},
+            "korea": {},
+            "trading_top5": ["거래대금 TOP: 데이터 수집 중", "상위 종목: 반도체/AI 중심"],
+            "sector_top5": ["AI·반도체", "에너지", "전력 인프라", "빅테크", "방산·원자재"],
+            "data_source_status": {"_bundle": "exception -> fallback"},
+        }
+    rank_items = build_news_rank_items()
+    rank_labels = [str(x.get("label", "")).strip() for x in rank_items[:4] if x.get("label")]
+
+    _card_modes = ("korea_close", "us_preopen", "macro_issue", "company_focus", "sector_focus")
+    # 요청 규칙: CONTENT_MODE가 카드모드면 그대로, 아니면 슬롯 기반/기본값(korea_close)
+    summary_mode = CONTENT_MODE if CONTENT_MODE in _card_modes else "korea_close"
+    if summary_mode == "korea_close" and CONTENT_MODE not in _card_modes:
+        slot = current_regular_slot()
+        if slot == "morning":
+            summary_mode = "us_preopen"
+        else:
+            summary_mode = "korea_close"
+
+    print(f"[market_briefing] content_mode={summary_mode}")
+    payload = build_daily_summary_payload_auto(
+        articles=raw_articles,
+        rank_labels=rank_labels,
+        date_line=generated_at_text(),
+        content_mode=summary_mode,
+        market_data=market_data,
+    )
+    caption_text = build_market_briefing_text(summary_mode, payload, market_data, raw_articles)
+    caption_path = os.path.join(BRIEF_OUT_DIR, "market_briefing.txt")
+    debug_path = os.path.join(BRIEF_OUT_DIR, "debug_payload.json")
+
+    try:
+        os.makedirs(BRIEF_OUT_DIR, exist_ok=True)
+        with open(caption_path, "w", encoding="utf-8") as f:
+            f.write(caption_text)
+        print(f"[briefing_text] wrote {caption_path}")
+    except Exception as e:
+        print(f"[briefing_text] write failed: {repr(e)}")
+
+    write_debug_payload_json(
+        debug_path,
+        content_mode=summary_mode,
+        payload=payload,
+        caption=caption_text,
+        market_data=market_data,
+        extra_fields={
+            "delivery": delivery,
+            "TEXT_BRIEFING_ONLY": TEXT_BRIEFING_ONLY,
+            "briefing_path": caption_path,
+        },
+    )
+
+    try:
+        print(f"[briefing_text] chars={len(caption_text)}")
+        print(f"[market_briefing] out_briefing={caption_path}")
+        print(f"[market_briefing] out_debug={debug_path}")
+    except Exception as e:
+        print(f"[market_briefing] log failed: {repr(e)}")
+
+    cp_ok = os.path.exists(caption_path)
+    if cp_ok:
+        print(f"[briefing_text] bytes={os.path.getsize(caption_path)}")
+
+    send_txt = send_storage_text or send_storage_message
+    sent_ok = False
+    if ENABLE_TELEGRAM_STORAGE:
+        if send_txt is not None and caption_text:
+            try:
+                chunk = 3800
+                for i in range(0, len(caption_text), chunk):
+                    send_txt(caption_text[i : i + chunk])
+                print("[telegram_storage_send] text ok")
+                sent_ok = True
+            except Exception as e:
+                print(f"[telegram_storage_send] text failed: {repr(e)}")
+        elif send_txt is None:
+            print("[telegram_storage_send] send_storage_text 없음")
+    else:
+        print("[market_briefing] ENABLE_TELEGRAM_STORAGE=false 전송 생략")
+
+    return summary_mode, payload, raw_articles, market_data, sent_ok
+
+
+def run_text_market_briefing_only() -> None:
+    """TEXT_BRIEFING_ONLY 전용: 텍스트 브리핑만 (carousel/card/money_flow 미호출)."""
+    print("[briefing_only] hard skip carousel pipeline")
+    print("[briefing_only] no image generation")
+    print("[briefing_only] no card rendering")
+    print("[selected_pipeline] text_market_briefing")
+    *_, sent_ok = _briefing_fetch_build_write_send(delivery="text_market_briefing")
+    if sent_ok:
+        print("[briefing_only] send text only")
+    if not FORCE_CARD_TEST:
+        mark_regular_sent()
+    else:
+        print("[card_test] mark_regular_sent 스킵 (FORCE_CARD_TEST)")
+
+
 def post_simple_news_cards() -> None:
+    """Carousel 경로. TEXT_BRIEFING_ONLY일 때는 호출되면 안 됨(방어적 no-op)."""
+    if TEXT_BRIEFING_ONLY:
+        print("[briefing_only] post_simple_news_cards 호출 차단 (TEXT_BRIEFING_ONLY=true)")
+        return
+
+    print("[briefing_only] disabled (carousel pipeline)")
     os.makedirs(CARD_OUT_DIR, exist_ok=True)
     for n in (
         "card_01.jpg",
@@ -580,138 +700,26 @@ def post_simple_news_cards() -> None:
             except Exception:
                 pass
 
-    raw_articles = fetch_news_articles(hours_back=24, limit=24)
-    try:
-        market_data = fetch_market_data_bundle()
-    except Exception as e:
-        print(f"[market_data] bundle fetch exception: {repr(e)}")
-        market_data = {
-            "quotes": {},
-            "korea": {},
-            "trading_top5": ["거래대금 TOP: 데이터 수집 중", "상위 종목: 반도체/AI 중심"],
-            "sector_top5": ["AI·반도체", "에너지", "전력 인프라", "빅테크", "방산·원자재"],
-            "data_source_status": {"_bundle": "exception -> fallback"},
-        }
-    rank_items = build_news_rank_items()
-    rank_labels = [str(x.get("label", "")).strip() for x in rank_items[:4] if x.get("label")]
-
-    _card_modes = ("korea_close", "us_preopen", "macro_issue", "company_focus", "sector_focus")
-    summary_mode = "macro_issue"
-    if FORCE_CARD_TEST:
-        cm = (os.getenv("CONTENT_MODE") or "macro_issue").strip().lower()
-        if cm in _card_modes:
-            summary_mode = cm
-        else:
-            summary_mode = "macro_issue"
-        print(f"[card_test] resolved card content_mode={summary_mode} (from CONTENT_MODE={cm})")
-    else:
-        slot = current_regular_slot()
-        if slot == "morning":
-            summary_mode = "us_preopen"
-        elif slot == "evening":
-            summary_mode = "korea_close"
-        elif CONTENT_MODE in _card_modes:
-            summary_mode = CONTENT_MODE
-
-    print(f"[money_flow] content_mode={summary_mode}")
-    payload = build_daily_summary_payload_auto(
-        articles=raw_articles,
-        rank_labels=rank_labels,
-        date_line=generated_at_text(),
-        content_mode=summary_mode,
-        market_data=market_data,
-    )
-    caption_path = os.path.join(CARD_OUT_DIR, "caption.txt")
-    carousel = generate_money_flow_carousel(
-        CARD_OUT_DIR,
-        payload,
-        raw_articles,
-        summary_mode,
-        preferred_keywords=background_keywords_for_mode(summary_mode),
-    )
-    hook_h = str(carousel.get("hook_headline", ""))
-    caption_text = build_carousel_caption_text(payload, hook_h, raw_articles)
-    try:
-        os.makedirs(os.path.dirname(caption_path) or ".", exist_ok=True)
-        with open(caption_path, "w", encoding="utf-8") as f:
-            f.write(caption_text)
-        print(f"[money_flow] caption txt: {caption_path}")
-    except Exception as e:
-        print(f"[money_flow] caption write failed: {repr(e)}")
-
-    debug_path = os.path.join(CARD_OUT_DIR, "debug_payload.json")
-    page_paths = list(carousel.get("page_paths") or [])
-    preview_path = str(carousel.get("preview_path", ""))
-    write_debug_payload_json(
-        debug_path,
-        content_mode=summary_mode,
-        payload=payload,
-        caption=caption_text,
-        market_data=market_data,
-        extra_fields={
-            "hook_headline": hook_h,
-            "headline": hook_h,
-            "page_paths": page_paths,
-            "preview_path": preview_path,
-            "design_system": "jadonnam_money_v1",
-        },
+    summary_mode, payload, raw_articles, market_data, _sent_ok = _briefing_fetch_build_write_send(
+        delivery="jadonnam_money_carousel",
     )
 
     try:
-        print(f"[card_build] content_mode={summary_mode}")
-        print(f"[card_build] hook_headline={hook_h}")
-        print(f"[card_build] money_flow={payload.flow_line}")
-        for ln in payload.number_lines:
-            print(f"[card_build] metric_line={ln}")
-        for pp in page_paths:
-            print(f"[card_build] out_page={pp}")
-        print(f"[card_build] out_preview={preview_path}")
-        print(f"[card_build] out_caption={caption_path}")
-        print(f"[card_build] out_debug={debug_path}")
+        from money_flow_card_system import generate_money_flow_carousel
+
+        from daily_summary_card import background_keywords_for_mode
+
+        generate_money_flow_carousel(
+            CARD_OUT_DIR,
+            payload,
+            raw_articles,
+            summary_mode,
+            preferred_keywords=background_keywords_for_mode(summary_mode),
+            market_data=market_data,
+        )
+        print("[carousel] money_flow_card_system 로컬 JPG 생성")
     except Exception as e:
-        print(f"[card_build] log failed: {repr(e)}")
-
-    for pp in page_paths + [preview_path]:
-        print(f"[money_flow] output check: {pp} exists={os.path.exists(pp)}")
-        if os.path.exists(pp):
-            _log_final_card_size(pp)
-    cp_ok = os.path.exists(caption_path)
-    print(f"[money_flow] caption check: {caption_path} exists={cp_ok}")
-    if cp_ok:
-        sz = os.path.getsize(caption_path)
-        print(f"[money_flow] caption_size={sz} bytes")
-
-    if ENABLE_TELEGRAM_STORAGE:
-        send_paths = [p for p in page_paths if os.path.exists(p)]
-        if preview_path and os.path.exists(preview_path):
-            send_paths.append(preview_path)
-        if send_storage_media_group is not None and send_paths:
-            try:
-                send_storage_media_group(send_paths)
-                print(f"[money_flow] 저장 채널 캐러셀 {len(send_paths)}장 전송")
-            except Exception as e:
-                print(f"[money_flow] media group failed: {repr(e)}")
-        elif send_storage_media_group is None:
-            print("[money_flow] send_storage_media_group 없음")
-        if send_storage_document is not None and cp_ok:
-            send_storage_document(caption_path, caption="daily summary caption")
-            print("[money_flow] 저장 채널 캡션(txt) 전송")
-        elif cp_ok:
-            txt = ""
-            try:
-                with open(caption_path, "r", encoding="utf-8") as f:
-                    txt = f.read()
-            except Exception as e:
-                print(f"[money_flow] caption read failed: {repr(e)}")
-            if txt and send_storage_message is not None:
-                chunk = 3800
-                for i in range(0, len(txt), chunk):
-                    send_storage_message(txt[i : i + chunk])
-                print("[money_flow] 저장 채널 캡션 메시지 전송(분할)")
-    else:
-        print("[money_flow] ENABLE_TELEGRAM_STORAGE=false 전송 생략")
-
-    print("[money_flow] reel/instagram upload disabled")
+        print(f"[carousel] money_flow optional run failed: {repr(e)}")
     if not FORCE_CARD_TEST:
         mark_regular_sent()
     else:
@@ -719,6 +727,9 @@ def post_simple_news_cards() -> None:
 
 
 def post_card_news_v2() -> None:
+    if TEXT_BRIEFING_ONLY:
+        print("[briefing_only] post_card_news_v2 호출 차단 (TEXT_BRIEFING_ONLY=true)")
+        return
     os.makedirs(CARD_OUT_DIR, exist_ok=True)
     raw_articles = fetch_news_articles(hours_back=24, limit=30)
     top = raw_articles[0] if raw_articles else {}
@@ -763,11 +774,7 @@ def post_card_news_v2() -> None:
         print(f"[card_news_v2] output check: {path} exists={exists}")
 
     if ENABLE_TELEGRAM_STORAGE:
-        if send_storage_media_group is not None:
-            send_storage_media_group(ordered_card_paths)
-            print("[카드뉴스 v2] 저장 채널 카드 5장 전송 완료")
-        else:
-            print("[카드뉴스 v2] send_storage_media_group 미사용(모듈 없음)")
+        print("[briefing_only] skipped card v2 storage image send (텍스트 전용 정책)")
     else:
         print("[카드뉴스 v2] ENABLE_TELEGRAM_STORAGE=false, 저장 채널 전송 생략")
 
@@ -793,6 +800,9 @@ def _topic_symbol(topic_slug: str) -> str:
 
 
 def post_market_fact_content() -> None:
+    if TEXT_BRIEFING_ONLY:
+        print("[briefing_only] post_market_fact_content 호출 차단 (TEXT_BRIEFING_ONLY=true)")
+        return
     os.makedirs(MARKET_FACT_OUT_DIR, exist_ok=True)
     # Remove old artifacts first to avoid stale outputs.
     for name in ("card_01.jpg", "card_02.jpg", "card_03.jpg", "card_04.jpg", "card_05.jpg"):
@@ -845,11 +855,7 @@ def post_market_fact_content() -> None:
         print(f"[market_fact] output check: {path} exists={exists} size={size} mtime={mtime}")
 
     if ENABLE_TELEGRAM_STORAGE:
-        if send_storage_media_group is not None:
-            send_storage_media_group(card_paths)
-            print("[market_fact] 저장 채널 카드 5장 전송 완료")
-        else:
-            print("[market_fact] send_storage_media_group 미사용(모듈 없음)")
+        print("[briefing_only] skipped market_fact storage image send (텍스트 전용 정책)")
     else:
         print("[market_fact] ENABLE_TELEGRAM_STORAGE=false, 저장 채널 전송 생략")
 
@@ -879,10 +885,16 @@ def post_breaking() -> None:
 def main() -> None:
     os.makedirs(OUT_DIR, exist_ok=True)
     if CARD_NEWS_MODE:
-        os.makedirs(CARD_OUT_DIR, exist_ok=True)
-        os.makedirs(MARKET_FACT_OUT_DIR, exist_ok=True)
+        os.makedirs(BRIEF_OUT_DIR, exist_ok=True)
+        if not TEXT_BRIEFING_ONLY:
+            os.makedirs(CARD_OUT_DIR, exist_ok=True)
+            os.makedirs(MARKET_FACT_OUT_DIR, exist_ok=True)
     if STATIC_REEL_MODE:
         os.makedirs(STATIC_REEL_OUT_DIR, exist_ok=True)
+
+    print(f"[env] TEXT_BRIEFING_ONLY={str(TEXT_BRIEFING_ONLY).lower()}")
+    print(f"[env] FORCE_CARD_TEST={str(FORCE_CARD_TEST).lower()}")
+    print(f"[env] CONTENT_MODE={CONTENT_MODE}")
 
     print(f"[mode] CARD_NEWS_MODE={str(CARD_NEWS_MODE).lower()}")
     print(f"[mode] USE_REEL_STORY_V2={str(USE_REEL_STORY_V2).lower()}")
@@ -893,9 +905,28 @@ def main() -> None:
     print(f"[mode] ENABLE_OPENAI_STATIC_IMAGE={str(ENABLE_OPENAI_STATIC_IMAGE).lower()}")
     print(f"[mode] ENABLE_OPENAI_CARD_IMAGE={str(ENABLE_OPENAI_CARD_IMAGE).lower()}")
     print(f"[mode] FORCE_CARD_TEST={str(FORCE_CARD_TEST).lower()}")
+    print(f"[mode] TEXT_BRIEFING_ONLY={str(TEXT_BRIEFING_ONLY).lower()}")
     print(f"[mode] FORCE_REGENERATE_STATIC_BG={str(FORCE_REGENERATE_STATIC_BG).lower()}")
     print(f"[mode] resolved content mode={resolve_content_mode()}")
     print(f"[mode] selected pipeline={selected_pipeline_name()}")
+    print(f"[selected_pipeline] {selected_pipeline_name()}")
+
+    # TEXT_BRIEFING_ONLY는 CARD_NEWS_MODE와 무관하게 최우선 실행 후 즉시 return
+    if TEXT_BRIEFING_ONLY:
+        print("[briefing_only] enabled")
+        print("[selected_pipeline] text_market_briefing")
+        try:
+            should_send_text = FORCE_CARD_TEST or should_run_regular_post()
+            if should_send_text:
+                # 중복 전송 방지(단, FORCE_CARD_TEST는 항상 실행)
+                if FORCE_CARD_TEST or not already_sent_regular():
+                    *_ignore, sent_ok = _briefing_fetch_build_write_send(delivery="text_market_briefing")
+                    if sent_ok:
+                        print("[briefing_only] send text only")
+            return
+        except Exception as e:
+            print("[briefing_only] text briefing failed:", repr(e))
+            return
 
     print(
         "[debug schedule]",
@@ -922,7 +953,7 @@ def main() -> None:
     try:
         print("[정규 업로드 체크 시작]")
         if CARD_NEWS_MODE and FORCE_CARD_TEST:
-            print("[card_test] FORCE_CARD_TEST=true — 슬롯 무시, CONTENT_MODE 기준 즉시 카드 생성")
+            print("[card_test] FORCE_CARD_TEST=true — 슬롯 무시, CONTENT_MODE 기준 즉시 실행")
             post_simple_news_cards()
         elif should_run_regular_post():
             if already_sent_regular():

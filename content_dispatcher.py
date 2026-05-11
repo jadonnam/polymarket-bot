@@ -138,6 +138,11 @@ def send_storage_message(text: str) -> None:
     res.raise_for_status()
 
 
+def send_storage_text(text: str) -> None:
+    """저장 채널로 텍스트만 전송(sendMessage). 이미지·파일 전송 없음."""
+    send_storage_message(text)
+
+
 def send_media_group(paths: Iterable[str]) -> None:
     # Legacy information-channel sender (unused in main_instagram.py)
     _check()

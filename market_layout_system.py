@@ -12,6 +12,8 @@ from PIL import Image, ImageDraw
 W, H = 1080, 1350
 FALLBACK_DIR = os.path.join("assets", "fallbacks")
 DEFAULT_MARKET_JPG = os.path.join(FALLBACK_DIR, "default_market.jpg")
+# PAGE1 전용: 차트·캔들 없이 도시/산업 실경 느낌의 정적 폴백
+PAGE1_MAGAZINE_FALLBACK_JPG = os.path.join(FALLBACK_DIR, "page1_magazine_fallback.jpg")
 
 
 def market_fallback_path(card_index: int) -> str:
@@ -67,6 +69,48 @@ def _draw_synthetic_market_scene(out_path: str, seed: int) -> None:
     od.rectangle((0, H - 200, W, H), fill=(0, 0, 0, 140))
     img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
     img.save(out_path, quality=92)
+
+
+def _draw_page1_magazine_fallback(out_path: str, seed: int) -> None:
+    """도시·공장 실사 느낌 실루엣. 캔들·차트·격자 대시보드 없음."""
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+    rnd = random.Random(seed)
+    img = Image.new("RGB", (W, H), (12, 14, 22))
+    d = ImageDraw.Draw(img)
+    for y in range(H):
+        t = y / max(1, H - 1)
+        r = int(8 + t * 72)
+        g = int(14 + t * 48)
+        b = int(32 + t * 110)
+        d.line((0, y, W, y), fill=(r, g, b))
+    horizon = int(H * 0.54)
+    d.rectangle((0, horizon, W, H), fill=(6, 7, 11))
+    for i in range(40):
+        x = 10 + i * 28 + rnd.randint(-5, 5)
+        h2 = rnd.randint(100, 420)
+        w2 = rnd.randint(20, 52)
+        top = horizon - h2
+        shade = rnd.randint(10, 18)
+        d.rectangle((x, top, x + w2, horizon), fill=(shade, shade + 2, shade + 4))
+    for _ in range(5):
+        cx = rnd.randint(100, W - 100)
+        top = horizon + rnd.randint(30, 120)
+        d.rectangle((cx, top, cx + rnd.randint(3, 6), H - 20), fill=(26, 28, 34))
+    overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    od = ImageDraw.Draw(overlay)
+    for y in range(horizon, H):
+        a = int(40 + (y - horizon) / max(1, H - horizon) * 120)
+        od.line((0, y, W, y), fill=(0, 0, 0, min(160, a)))
+    img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
+    img.save(out_path, quality=93)
+
+
+def ensure_page1_magazine_fallback() -> None:
+    os.makedirs(FALLBACK_DIR, exist_ok=True)
+    path = PAGE1_MAGAZINE_FALLBACK_JPG
+    if os.path.exists(path) and os.path.getsize(path) > 1024:
+        return
+    _draw_page1_magazine_fallback(path, seed=18403)
 
 
 def ensure_fallback_assets() -> None:

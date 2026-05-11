@@ -5,13 +5,19 @@ import os
 import re
 from dataclasses import dataclass
 from io import BytesIO
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import requests
 from PIL import Image, ImageDraw, ImageFont
 
 from korea_market_data import fetch_korea_market_data
-from market_layout_system import DEFAULT_MARKET_JPG, ensure_fallback_assets, log_pil_open
+from market_layout_system import (
+    DEFAULT_MARKET_JPG,
+    PAGE1_MAGAZINE_FALLBACK_JPG,
+    ensure_fallback_assets,
+    ensure_page1_magazine_fallback,
+    log_pil_open,
+)
 
 W, H = 1080, 1350
 
@@ -39,6 +45,10 @@ _SYMBOLS = {
     "WTI": "CL=F",
     "NASDAQ": "^IXIC",
     "SP500": "^GSPC",
+    "NQ_FUT": "NQ=F",
+    "ES_FUT": "ES=F",
+    "YM_FUT": "YM=F",
+    "DXY": "DX-Y.NYB",
 }
 
 
@@ -100,12 +110,15 @@ def _has_keywords(text: str, keywords: List[str]) -> bool:
 def load_single_news_background(
     articles: List[Dict[str, Any]],
     preferred_keywords: Optional[List[str]] = None,
+    strict_article_order: bool = False,
 ) -> Image.Image:
     """One real-news style image, keyword-prioritized + deterministic fallback."""
     ensure_fallback_assets()
     keywords = preferred_keywords or []
     ordered: List[Dict[str, Any]] = []
-    if keywords:
+    if strict_article_order:
+        ordered = list(articles[:25])
+    elif keywords:
         preferred = []
         normal = []
         for a in articles[:20]:
@@ -137,6 +150,96 @@ def load_single_news_background(
     ensure_fallback_assets()
     bg = Image.open(DEFAULT_MARKET_JPG).convert("RGB")
     return _cover_background(bg)
+
+
+def load_page1_background_tracked(
+    ranked_articles: List[Dict[str, Any]],
+    preferred_keywords: Optional[List[str]] = None,
+) -> Tuple[Image.Image, str]:
+    """
+    PAGE1 전용: `money_flow_card_system`에서 정렬·티어 메타가 붙은 기사 순으로 로드.
+    반환: (이미지, image_priority_used 라벨)
+    """
+    ensure_fallback_assets()
+    if preferred_keywords:
+        pkw = [k.lower() for k in preferred_keywords]
+        boosted: List[Dict[str, Any]] = []
+        rest: List[Dict[str, Any]] = []
+        for a in ranked_articles[:25]:
+            blob = f"{a.get('title', '')} {a.get('description', '')}".lower()
+            if any(k in blob for k in pkw):
+                boosted.append(a)
+            else:
+                rest.append(a)
+        ordered = boosted + rest
+    else:
+        ordered = list(ranked_articles[:25])
+
+    for a in ordered:
+        url = str(a.get("urlToImage") or "").strip()
+        if not url:
+            continue
+        bg = _fetch_image(url)
+        if bg is not None:
+            tier = str(a.get("_mf_photo_tier") or "general_news")
+            print(f"[page1_image] loaded tier={tier}")
+            return _cover_background(bg), tier
+
+    ensure_page1_magazine_fallback()
+    p = PAGE1_MAGAZINE_FALLBACK_JPG
+    if os.path.exists(p):
+        bg = Image.open(p).convert("RGB")
+        log_pil_open(bg, "page1 magazine photo fallback (no chart)")
+        print("[page1_image] tier=fallback_magazine")
+        return _cover_background(bg), "fallback_magazine"
+    ensure_fallback_assets()
+    bg = Image.open(DEFAULT_MARKET_JPG).convert("RGB")
+    return _cover_background(bg), "fallback"
+
+
+def _reference_page1_solid_gradient() -> Image.Image:
+    """차트·캔들 없음. 다크 단색 그라데이션만 (레퍼런스 카드 PAGE1 폴백)."""
+    img = Image.new("RGB", (W, H), (5, 6, 7))
+    d = ImageDraw.Draw(img)
+    for y in range(H):
+        t = y / max(1, H - 1)
+        r = int(5 + t * 8)
+        g = int(6 + t * 10)
+        b = int(7 + t * 12)
+        d.line((0, y, W, y), fill=(r, g, b))
+    return img
+
+
+def load_reference_page1_photo(
+    articles: List[Dict[str, Any]],
+    preferred_keywords: Optional[List[str]] = None,
+) -> Tuple[Image.Image, str]:
+    """뉴스 url 이미지 우선. 실패 시 캔들 합성 배경 없이 다크 그라데이션만."""
+    keywords = preferred_keywords or []
+    ordered: List[Dict[str, Any]] = []
+    if keywords:
+        preferred: List[Dict[str, Any]] = []
+        normal: List[Dict[str, Any]] = []
+        for a in articles[:20]:
+            text = f"{a.get('title', '')} {a.get('description', '')}"
+            if _has_keywords(text, keywords):
+                preferred.append(a)
+            else:
+                normal.append(a)
+        ordered = preferred + normal
+    else:
+        ordered = list(articles[:20])
+
+    for a in ordered:
+        url = str(a.get("urlToImage") or "").strip()
+        if not url:
+            continue
+        bg = _fetch_image(url)
+        if bg is not None:
+            print("[reference_card] page1 background=news_url")
+            return _cover_background(bg), "photo"
+    print("[reference_card] page1 background=solid_gradient")
+    return _cover_background(_reference_page1_solid_gradient()), "solid"
 
 
 def _shorten(s: str, n: int) -> str:
