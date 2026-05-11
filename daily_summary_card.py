@@ -740,6 +740,7 @@ def write_debug_payload_json(
     payload: DailySummaryPayload,
     caption: str,
     market_data: Dict[str, Any],
+    extra_fields: Optional[Dict[str, Any]] = None,
 ) -> None:
     try:
         news = list(payload.news_lines or [])
@@ -755,6 +756,8 @@ def write_debug_payload_json(
             "data_source_status": dict(market_data.get("data_source_status") or {}),
             "caption": caption,
         }
+        if extra_fields:
+            data.update(extra_fields)
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)

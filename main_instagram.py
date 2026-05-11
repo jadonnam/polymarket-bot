@@ -17,13 +17,11 @@ from ranking_template import render_ranking_template
 from stock_study_template import render_stock_study_template
 from daily_summary_card import (
     background_keywords_for_mode,
-    build_caption_text,
     build_daily_summary_payload_auto,
     fetch_market_data_bundle,
-    render_daily_summary_card,
-    write_caption_file,
     write_debug_payload_json,
 )
+from money_flow_card_system import build_carousel_caption_text, generate_money_flow_carousel
 
 try:
     from content_dispatcher import (
@@ -92,7 +90,7 @@ def selected_pipeline_name() -> str:
     if STATIC_REEL_MODE:
         return "disabled_static_reel"
     if CARD_NEWS_MODE:
-        return "daily_summary_card"
+        return "jadonnam_money_carousel"
     return "card_news_only"
 
 
@@ -567,6 +565,11 @@ def post_simple_news_cards() -> None:
         "card_04.jpg",
         "card_05.jpg",
         "daily_summary_card.jpg",
+        "page1.jpg",
+        "page2.jpg",
+        "page3.jpg",
+        "page4.jpg",
+        "carousel_preview.jpg",
         "caption.txt",
         "debug_payload.json",
     ):
@@ -610,7 +613,7 @@ def post_simple_news_cards() -> None:
         elif CONTENT_MODE in _card_modes:
             summary_mode = CONTENT_MODE
 
-    print(f"[daily_summary] content_mode={summary_mode}")
+    print(f"[money_flow] content_mode={summary_mode}")
     payload = build_daily_summary_payload_auto(
         articles=raw_articles,
         rank_labels=rank_labels,
@@ -618,74 +621,97 @@ def post_simple_news_cards() -> None:
         content_mode=summary_mode,
         market_data=market_data,
     )
-    out_jpg = os.path.join(CARD_OUT_DIR, "daily_summary_card.jpg")
     caption_path = os.path.join(CARD_OUT_DIR, "caption.txt")
-
-    render_daily_summary_card(
-        out_jpg,
+    carousel = generate_money_flow_carousel(
+        CARD_OUT_DIR,
         payload,
         raw_articles,
-        preferred_background_keywords=background_keywords_for_mode(summary_mode),
+        summary_mode,
+        preferred_keywords=background_keywords_for_mode(summary_mode),
     )
+    hook_h = str(carousel.get("hook_headline", ""))
+    caption_text = build_carousel_caption_text(payload, hook_h)
     try:
-        write_caption_file(caption_path, payload)
+        os.makedirs(os.path.dirname(caption_path) or ".", exist_ok=True)
+        with open(caption_path, "w", encoding="utf-8") as f:
+            f.write(caption_text)
+        print(f"[money_flow] caption txt: {caption_path}")
     except Exception as e:
-        print(f"[daily_summary] caption write failed: {repr(e)}")
-    caption_text = build_caption_text(payload)
+        print(f"[money_flow] caption write failed: {repr(e)}")
 
     debug_path = os.path.join(CARD_OUT_DIR, "debug_payload.json")
+    page_paths = list(carousel.get("page_paths") or [])
+    preview_path = str(carousel.get("preview_path", ""))
     write_debug_payload_json(
         debug_path,
         content_mode=summary_mode,
         payload=payload,
         caption=caption_text,
         market_data=market_data,
+        extra_fields={
+            "hook_headline": hook_h,
+            "headline": hook_h,
+            "page_paths": page_paths,
+            "preview_path": preview_path,
+            "design_system": "jadonnam_money_v1",
+        },
     )
 
     try:
         print(f"[card_build] content_mode={summary_mode}")
+        print(f"[card_build] hook_headline={hook_h}")
         print(f"[card_build] money_flow={payload.flow_line}")
         for ln in payload.number_lines:
             print(f"[card_build] metric_line={ln}")
-        print(f"[card_build] out_jpg={out_jpg}")
+        for pp in page_paths:
+            print(f"[card_build] out_page={pp}")
+        print(f"[card_build] out_preview={preview_path}")
         print(f"[card_build] out_caption={caption_path}")
         print(f"[card_build] out_debug={debug_path}")
     except Exception as e:
         print(f"[card_build] log failed: {repr(e)}")
 
-    print(f"[daily_summary] output check: {out_jpg} exists={os.path.exists(out_jpg)}")
-    _log_final_card_size(out_jpg)
+    for pp in page_paths + [preview_path]:
+        print(f"[money_flow] output check: {pp} exists={os.path.exists(pp)}")
+        if os.path.exists(pp):
+            _log_final_card_size(pp)
     cp_ok = os.path.exists(caption_path)
-    print(f"[daily_summary] caption check: {caption_path} exists={cp_ok}")
+    print(f"[money_flow] caption check: {caption_path} exists={cp_ok}")
     if cp_ok:
         sz = os.path.getsize(caption_path)
-        print(f"[daily_summary] caption_size={sz} bytes")
+        print(f"[money_flow] caption_size={sz} bytes")
 
     if ENABLE_TELEGRAM_STORAGE:
-        if send_storage_image is not None:
-            send_storage_image(out_jpg, caption="")
-            print("[daily_summary] 저장 채널 요약 카드 1장 전송")
-        else:
-            print("[daily_summary] send_storage_image 없음")
+        send_paths = [p for p in page_paths if os.path.exists(p)]
+        if preview_path and os.path.exists(preview_path):
+            send_paths.append(preview_path)
+        if send_storage_media_group is not None and send_paths:
+            try:
+                send_storage_media_group(send_paths)
+                print(f"[money_flow] 저장 채널 캐러셀 {len(send_paths)}장 전송")
+            except Exception as e:
+                print(f"[money_flow] media group failed: {repr(e)}")
+        elif send_storage_media_group is None:
+            print("[money_flow] send_storage_media_group 없음")
         if send_storage_document is not None and cp_ok:
             send_storage_document(caption_path, caption="daily summary caption")
-            print("[daily_summary] 저장 채널 캡션(txt) 전송")
+            print("[money_flow] 저장 채널 캡션(txt) 전송")
         elif cp_ok:
             txt = ""
             try:
                 with open(caption_path, "r", encoding="utf-8") as f:
                     txt = f.read()
             except Exception as e:
-                print(f"[daily_summary] caption read failed: {repr(e)}")
+                print(f"[money_flow] caption read failed: {repr(e)}")
             if txt and send_storage_message is not None:
                 chunk = 3800
                 for i in range(0, len(txt), chunk):
                     send_storage_message(txt[i : i + chunk])
-                print("[daily_summary] 저장 채널 캡션 메시지 전송(분할)")
+                print("[money_flow] 저장 채널 캡션 메시지 전송(분할)")
     else:
-        print("[daily_summary] ENABLE_TELEGRAM_STORAGE=false 전송 생략")
+        print("[money_flow] ENABLE_TELEGRAM_STORAGE=false 전송 생략")
 
-    print("[daily_summary] reel/instagram upload disabled")
+    print("[money_flow] reel/instagram upload disabled")
     if not FORCE_CARD_TEST:
         mark_regular_sent()
     else:
