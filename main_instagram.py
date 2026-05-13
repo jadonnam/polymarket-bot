@@ -901,6 +901,10 @@ def main() -> None:
 
     print(f"[env] TEXT_BRIEFING_ONLY={str(TEXT_BRIEFING_ONLY).lower()}")
     print(f"[env] TELEGRAM_SINGLE_CARD={str(TELEGRAM_SINGLE_CARD).lower()}")
+    print(
+        f"[env] TELEGRAM_CARD_USE_NEWS_IMAGE="
+        f"{str((os.getenv('TELEGRAM_CARD_USE_NEWS_IMAGE') or 'false').lower() == 'true').lower()}"
+    )
     print(f"[env] NEWS_API_KEY={'set' if NEWS_API_KEY_SET else 'missing'}")
     print(f"[env] FORCE_CARD_TEST={str(FORCE_CARD_TEST).lower()}")
     print(f"[env] CONTENT_MODE={CONTENT_MODE}")

@@ -16,15 +16,18 @@ import requests
 import news as news_module
 
 try:
-    from PIL import Image, ImageDraw, ImageFont
+    from PIL import Image, ImageDraw, ImageFilter, ImageFont
 except ImportError:  # pragma: no cover
     Image = None  # type: ignore
     ImageDraw = None  # type: ignore
+    ImageFilter = None  # type: ignore
     ImageFont = None  # type: ignore
 
 W, H = 1080, 1350
 PAD_X = 56
-BOTTOM_ZONE = 520
+BOTTOM_ZONE = 620
+# NewsAPI urlToImage는 기사와 안 맞는 경우가 많아 기본은 끔(그라데이션 배경)
+TELEGRAM_CARD_USE_NEWS_IMAGE = (os.getenv("TELEGRAM_CARD_USE_NEWS_IMAGE") or "false").lower() == "true"
 
 
 def _font_candidates() -> List[str]:
@@ -120,15 +123,29 @@ def _solid_background(tw: int, th: int) -> Image.Image:
 
 
 def _apply_bottom_gradient(base: Image.Image) -> None:
-    """In-place bottom darken for text legibility."""
+    """In-place bottom darken for text legibility (강한 편)."""
     overlay = Image.new("RGBA", base.size, (0, 0, 0, 0))
     d = ImageDraw.Draw(overlay)
     y0 = base.height - BOTTOM_ZONE
     for y in range(y0, base.height):
         t = (y - y0) / max(BOTTOM_ZONE - 1, 1)
-        alpha = int(215 * (t**1.12))
-        d.line([(0, y), (base.width, y)], fill=(0, 0, 0, alpha))
+        alpha = int(40 + 215 * (t**1.05))
+        d.line([(0, y), (base.width, y)], fill=(0, 0, 0, min(alpha, 245)))
     base.alpha_composite(overlay)
+
+
+def _draw_text_outlined(
+    draw: Any,
+    xy: Tuple[int, int],
+    text: str,
+    font: Any,
+    fill: Tuple[int, int, int, int] = (255, 255, 255, 255),
+    outline: Tuple[int, int, int, int] = (0, 0, 0, 230),
+) -> None:
+    x, y = xy
+    for ox, oy in ((-2, 0), (2, 0), (0, -2), (0, 2), (-2, -2), (2, -2), (-2, 2), (2, 2)):
+        draw.text((x + ox, y + oy), text, font=font, fill=outline)
+    draw.text((x, y), text, font=font, fill=fill)
 
 
 def _wrap_lines(draw: Any, text: str, font: Any, max_width: int) -> List[str]:
@@ -204,7 +221,24 @@ def render_single_card(article: Dict[str, Any], out_path: str) -> str:
     source = news_module.article_source_name(article)
 
     bg_url = _article_image_url(article)
-    bg = _download_image(bg_url) if bg_url else None
+    bg = None
+    if TELEGRAM_CARD_USE_NEWS_IMAGE and bg_url:
+        bg = _download_image(bg_url)
+        if bg is not None and ImageFilter is not None:
+            try:
+                bg = bg.filter(ImageFilter.GaussianBlur(radius=2))
+            except Exception:
+                pass
+        print(f"[telegram_single_card] bg_mode=article_image url={bg_url[:60]}…")
+    else:
+        if bg_url and not TELEGRAM_CARD_USE_NEWS_IMAGE:
+            print(
+                "[telegram_single_card] bg_mode=solid "
+                "(TELEGRAM_CARD_USE_NEWS_IMAGE=false — urlToImage는 기사와 불일치할 수 있음)"
+            )
+        else:
+            print("[telegram_single_card] bg_mode=solid (no usable urlToImage)")
+
     if bg is not None:
         base = _cover_background(bg, W, H)
     else:
@@ -215,19 +249,19 @@ def render_single_card(article: Dict[str, Any], out_path: str) -> str:
     draw = ImageDraw.Draw(base)
 
     brand = (os.getenv("CARD_BRAND_LABEL") or "MARKET CARD").strip()
-    f_brand = _load_font(26)
-    draw.text((PAD_X, 44), brand, font=f_brand, fill=(230, 230, 235, 230))
+    f_brand = _load_font(28)
+    _draw_text_outlined(draw, (PAD_X, 44), brand, f_brand)
 
     max_text_w = W - 2 * PAD_X
     body = title if not subtitle else f"{title}\n{subtitle}"
 
-    font_size = 52
+    font_size = 58
     lines: List[str] = []
-    while font_size >= 30:
+    while font_size >= 32:
         font = _load_font(font_size)
         lines = _wrap_lines(draw, body, font, max_text_w)
-        est_h = len(lines) * int(font_size * 1.25)
-        if est_h < BOTTOM_ZONE - 120:
+        est_h = len(lines) * int(font_size * 1.28)
+        if est_h < BOTTOM_ZONE - 140:
             break
         font_size -= 2
 
@@ -240,15 +274,24 @@ def render_single_card(article: Dict[str, Any], out_path: str) -> str:
             "[telegram_single_card] CJK 문자 포함 — Railway/Linux에서는 CARD_FONT_PATH(NotoSansKR 등) 설정 권장"
         )
 
-    y0 = H - BOTTOM_ZONE + 72
+    line_h = int(font_size * 1.26)
+    y0 = H - BOTTOM_ZONE + 56
+    y_end = y0 + len(lines) * line_h + 8
+    panel_bottom = min(H - 44, y_end + 20)
+    panel_rect = [PAD_X - 20, y0 - 20, W - PAD_X + 20, panel_bottom]
+    try:
+        draw.rounded_rectangle(panel_rect, radius=18, fill=(0, 0, 0, 155))
+    except Exception:
+        draw.rectangle(panel_rect, fill=(0, 0, 0, 155))
+
     y = y0
     for line in lines:
-        draw.text((PAD_X, y), line, font=font, fill=(255, 255, 255, 255))
-        y += int(font_size * 1.22)
+        _draw_text_outlined(draw, (PAD_X, y), line, font)
+        y += line_h
 
     src_line = f"출처: {source}" if source else "출처: 확인됨(통신사/도메인 화이트리스트)"
-    f_src = _load_font(22)
-    draw.text((PAD_X, H - 52), src_line, font=f_src, fill=(190, 200, 210, 255))
+    f_src = _load_font(24)
+    _draw_text_outlined(draw, (PAD_X, H - 56), src_line, f_src, fill=(220, 228, 236, 255))
 
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     base.convert("RGB").save(out_path, "JPEG", quality=92, optimize=True)
@@ -257,14 +300,27 @@ def render_single_card(article: Dict[str, Any], out_path: str) -> str:
 
 
 def build_telegram_caption(article: Dict[str, Any]) -> str:
+    """텔레그램 캡션(1024자 제한): 제목·한 줄 요약 + 메타."""
+    title = news_module.clean_spaces(article.get("title", "") or "")
+    desc = _subtitle_from_article(article)
     src = news_module.article_source_name(article)
     url = str(article.get("url") or "").strip()
-    parts = ["[팩트 게이트]", "선별: 신뢰 통신사·도메인 + 시장 연관 + 저품질 제외"]
+    parts: List[str] = []
+    if title:
+        parts.append("📌 " + title[:420])
+    if desc:
+        parts.append(desc[:360])
+    parts.append("")
+    parts.append("[팩트 게이트]")
+    parts.append("선별: 신뢰 통신사·도메인 + 시장 연관 + 저품질 제외")
     if src:
         parts.append(f"매체: {src}")
     if url:
         parts.append(f"원문: {url}")
-    return "\n".join(parts)
+    cap = "\n".join(parts).strip()
+    if len(cap) > 1020:
+        cap = cap[:1017] + "…"
+    return cap
 
 
 def run_telegram_single_card(
