@@ -923,9 +923,13 @@ def main() -> None:
     # TEXT_BRIEFING_ONLY는 CARD_NEWS_MODE와 무관하게 최우선 실행 후 즉시 return
     if TEXT_BRIEFING_ONLY:
         print("[briefing_only] enabled")
-        print(f"[selected_pipeline] {selected_pipeline_name()}")
         try:
             should_send_text = FORCE_CARD_TEST or should_run_regular_post()
+            if not should_send_text:
+                print(
+                    "[briefing_only] skip send: "
+                    "정규 슬롯 아님(FORCE_REGULAR_NOW=false, FORCE_CARD_TEST=false)"
+                )
             if should_send_text:
                 # 중복 전송 방지(단, FORCE_CARD_TEST는 항상 실행)
                 if FORCE_CARD_TEST or not already_sent_regular():
@@ -996,6 +1000,11 @@ def main() -> None:
                             print("[briefing_only] send text only")
                             if not FORCE_CARD_TEST:
                                 mark_regular_sent()
+                else:
+                    print(
+                        "[briefing_only] skip send: "
+                        "이미 오늘 정규 슬롯 전송됨 (regular_rank_state.json)"
+                    )
             return
         except Exception as e:
             print("[briefing_only] text briefing failed:", repr(e))
