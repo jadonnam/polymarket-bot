@@ -9,6 +9,7 @@
 - 템플릿 고정 + 데이터만 변경
 
 1) Railway Variables (필수)
+- NEWS_API_KEY (NewsAPI.org — 뉴스 수집·단일 카드 후보)
 - CHECK_INTERVAL=1800
 - CARD_NEWS_MODE=true
 - CONTENT_MODE=market_fact

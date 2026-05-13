@@ -78,6 +78,7 @@ ENABLE_OPENAI_CARD_IMAGE = (os.getenv("ENABLE_OPENAI_CARD_IMAGE") or "false").lo
 FORCE_CARD_TEST = (os.getenv("FORCE_CARD_TEST") or "false").lower() == "true"
 TEXT_BRIEFING_ONLY = (os.getenv("TEXT_BRIEFING_ONLY") or "true").lower() == "true"
 TELEGRAM_SINGLE_CARD = (os.getenv("TELEGRAM_SINGLE_CARD") or "true").lower() == "true"
+NEWS_API_KEY_SET = bool((os.getenv("NEWS_API_KEY") or "").strip())
 
 # 스레드 중간 포스팅 시간 (KST 시간 기준)
 THREADS_MIDDAY_HOURS = [9, 13, 17, 21]
@@ -900,6 +901,7 @@ def main() -> None:
 
     print(f"[env] TEXT_BRIEFING_ONLY={str(TEXT_BRIEFING_ONLY).lower()}")
     print(f"[env] TELEGRAM_SINGLE_CARD={str(TELEGRAM_SINGLE_CARD).lower()}")
+    print(f"[env] NEWS_API_KEY={'set' if NEWS_API_KEY_SET else 'missing'}")
     print(f"[env] FORCE_CARD_TEST={str(FORCE_CARD_TEST).lower()}")
     print(f"[env] CONTENT_MODE={CONTENT_MODE}")
 
