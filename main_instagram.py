@@ -24,11 +24,13 @@ from telegram_curation import build_market_briefing_text
 
 try:
     from content_dispatcher import (
+        send_storage_image,
         send_storage_message,
         send_storage_text,
         send_storage_video,
     )
 except Exception:
+    send_storage_image = None
     send_storage_message = None
     send_storage_text = None
     send_storage_video = None
@@ -51,6 +53,7 @@ CARD_OUT_DIR = "output_cardnews"
 BRIEF_OUT_DIR = "output_briefing"
 MARKET_FACT_OUT_DIR = "output_marketfact"
 STATIC_REEL_OUT_DIR = "output_static_reel"
+TELEGRAM_CARD_OUT_DIR = "output_telegram_card"
 
 REGULAR_POST_MINUTE_WINDOW = int((os.getenv("REGULAR_POST_MINUTE_WINDOW") or "30").strip())
 REGULAR_MORNING_MINUTE = 8 * 60 + 10
@@ -74,6 +77,7 @@ REEL_AUTOMATION_ENABLED = (os.getenv("REEL_AUTOMATION_ENABLED") or "false").lowe
 ENABLE_OPENAI_CARD_IMAGE = (os.getenv("ENABLE_OPENAI_CARD_IMAGE") or "false").lower() == "true"
 FORCE_CARD_TEST = (os.getenv("FORCE_CARD_TEST") or "false").lower() == "true"
 TEXT_BRIEFING_ONLY = (os.getenv("TEXT_BRIEFING_ONLY") or "true").lower() == "true"
+TELEGRAM_SINGLE_CARD = (os.getenv("TELEGRAM_SINGLE_CARD") or "true").lower() == "true"
 
 # 스레드 중간 포스팅 시간 (KST 시간 기준)
 THREADS_MIDDAY_HOURS = [9, 13, 17, 21]
@@ -86,7 +90,7 @@ def now_kst() -> datetime:
 def selected_pipeline_name() -> str:
     # TEXT_BRIEFING_ONLY는 CARD_NEWS_MODE와 무관하게 최우선 적용
     if TEXT_BRIEFING_ONLY:
-        return "text_market_briefing"
+        return "telegram_single_card" if TELEGRAM_SINGLE_CARD else "text_market_briefing"
     if STATIC_REEL_MODE:
         return "disabled_static_reel"
     if CARD_NEWS_MODE:
@@ -884,6 +888,8 @@ def post_breaking() -> None:
 
 def main() -> None:
     os.makedirs(OUT_DIR, exist_ok=True)
+    if TEXT_BRIEFING_ONLY and TELEGRAM_SINGLE_CARD:
+        os.makedirs(TELEGRAM_CARD_OUT_DIR, exist_ok=True)
     if CARD_NEWS_MODE:
         os.makedirs(BRIEF_OUT_DIR, exist_ok=True)
         if not TEXT_BRIEFING_ONLY:
@@ -893,6 +899,7 @@ def main() -> None:
         os.makedirs(STATIC_REEL_OUT_DIR, exist_ok=True)
 
     print(f"[env] TEXT_BRIEFING_ONLY={str(TEXT_BRIEFING_ONLY).lower()}")
+    print(f"[env] TELEGRAM_SINGLE_CARD={str(TELEGRAM_SINGLE_CARD).lower()}")
     print(f"[env] FORCE_CARD_TEST={str(FORCE_CARD_TEST).lower()}")
     print(f"[env] CONTENT_MODE={CONTENT_MODE}")
 
@@ -914,15 +921,79 @@ def main() -> None:
     # TEXT_BRIEFING_ONLY는 CARD_NEWS_MODE와 무관하게 최우선 실행 후 즉시 return
     if TEXT_BRIEFING_ONLY:
         print("[briefing_only] enabled")
-        print("[selected_pipeline] text_market_briefing")
+        print(f"[selected_pipeline] {selected_pipeline_name()}")
         try:
             should_send_text = FORCE_CARD_TEST or should_run_regular_post()
             if should_send_text:
                 # 중복 전송 방지(단, FORCE_CARD_TEST는 항상 실행)
                 if FORCE_CARD_TEST or not already_sent_regular():
-                    *_ignore, sent_ok = _briefing_fetch_build_write_send(delivery="text_market_briefing")
-                    if sent_ok:
-                        print("[briefing_only] send text only")
+                    if TELEGRAM_SINGLE_CARD:
+                        from telegram_single_card import (
+                            build_telegram_caption,
+                            run_telegram_single_card,
+                        )
+
+                        print("[market_briefing] content_mode=single_trusted_news")
+                        arts = fetch_news_articles(hours_back=36, limit=40)
+                        card_path, picked = run_telegram_single_card(
+                            articles=arts,
+                            out_dir=TELEGRAM_CARD_OUT_DIR,
+                        )
+                        if (
+                            card_path
+                            and picked
+                            and ENABLE_TELEGRAM_STORAGE
+                            and send_storage_image is not None
+                        ):
+                            try:
+                                send_storage_image(
+                                    card_path,
+                                    build_telegram_caption(picked),
+                                )
+                                print("[telegram_storage_send] photo ok")
+                                print("[briefing_only] send single card only")
+                                if not FORCE_CARD_TEST:
+                                    mark_regular_sent()
+                            except Exception as e:
+                                print(f"[telegram_single_card] send_storage_image failed: {repr(e)}")
+                                *_ignore, sent_ok = _briefing_fetch_build_write_send(
+                                    delivery="text_market_briefing"
+                                )
+                                if sent_ok:
+                                    print("[telegram_storage_send] text ok")
+                                    print("[briefing_only] send text only")
+                                    if not FORCE_CARD_TEST:
+                                        mark_regular_sent()
+                        else:
+                            if not card_path or not picked:
+                                print(
+                                    "[telegram_single_card] 카드 생성 불가 — 텍스트 브리핑으로 대체"
+                                )
+                            elif not ENABLE_TELEGRAM_STORAGE:
+                                print(
+                                    "[telegram_single_card] ENABLE_TELEGRAM_STORAGE=false 전송 생략"
+                                )
+                            elif send_storage_image is None:
+                                print(
+                                    "[telegram_single_card] send_storage_image 없음 — 텍스트 브리핑으로 대체"
+                                )
+                            *_ignore, sent_ok = _briefing_fetch_build_write_send(
+                                delivery="text_market_briefing"
+                            )
+                            if sent_ok:
+                                print("[telegram_storage_send] text ok")
+                                print("[briefing_only] send text only")
+                                if not FORCE_CARD_TEST:
+                                    mark_regular_sent()
+                    else:
+                        *_ignore, sent_ok = _briefing_fetch_build_write_send(
+                            delivery="text_market_briefing"
+                        )
+                        if sent_ok:
+                            print("[telegram_storage_send] text ok")
+                            print("[briefing_only] send text only")
+                            if not FORCE_CARD_TEST:
+                                mark_regular_sent()
             return
         except Exception as e:
             print("[briefing_only] text briefing failed:", repr(e))

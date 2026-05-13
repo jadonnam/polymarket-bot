@@ -1,0 +1,6 @@
+# Railway config-as-code: https://docs.railway.com/reference/config-as-code
+# 코드의 설정이 대시보드보다 우선합니다.
+
+[deploy]
+startCommand = "python main_instagram.py"
+restartPolicyType = "ON_FAILURE"
