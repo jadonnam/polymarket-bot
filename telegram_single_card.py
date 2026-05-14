@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 import re
 from typing import Any, Dict, List, Optional, Tuple
@@ -30,6 +31,74 @@ BOTTOM_ZONE = 620
 TELEGRAM_CARD_USE_NEWS_IMAGE = (os.getenv("TELEGRAM_CARD_USE_NEWS_IMAGE") or "false").lower() == "true"
 _CARD_TMPL = (os.getenv("CARD_TEMPLATE") or "photo").strip().lower()
 CARD_TEMPLATE = _CARD_TMPL if _CARD_TMPL in ("photo", "badge", "quote") else "photo"
+
+
+def _openai_headline_enabled() -> bool:
+    raw = (os.getenv("CARD_HEADLINE_OPENAI") or "auto").strip().lower()
+    key = (os.getenv("OPENAI_API_KEY") or "").strip()
+    if raw in ("false", "0", "no", "off"):
+        return False
+    if raw in ("true", "1", "yes", "on"):
+        return bool(key)
+    return bool(key)
+
+
+def _try_openai_korean_card_lines(article: Dict[str, Any]) -> Optional[Tuple[str, str]]:
+    """OPENAI_API_KEY + CARD_HEADLINE_OPENAI 시 카드용 한국어 2줄(JSON). 실패 시 None."""
+    if not _openai_headline_enabled():
+        return None
+    try:
+        from openai import OpenAI
+    except Exception as e:
+        print(f"[card_ko] openai import failed: {repr(e)}")
+        return None
+    title = news_module.clean_spaces(article.get("title", "") or "")
+    desc = news_module.clean_spaces(
+        article.get("description", "") or article.get("content", "") or ""
+    )[:900]
+    if len(title) < 10:
+        return None
+    model = (os.getenv("OPENAI_HEADLINE_MODEL") or "gpt-4o-mini").strip()
+    client = OpenAI(api_key=(os.getenv("OPENAI_API_KEY") or "").strip())
+    sys = (
+        "You write Korean headlines for a vertical news card (Instagram/Telegram). "
+        "Style: concise neutral market news like Korean wire services. "
+        "No emoji, no clickbait, no exclamation. "
+        'Output JSON only: {"line1":"...","line2":"..."}. '
+        "line1 = main headline (한글 우선, max ~42 chars). "
+        "line2 = supporting line (한글, max ~90 chars). "
+        "Keep tickers and proper nouns in Latin when natural (NVDA, Fed, CPI). "
+        "If the input title is already Korean, polish lightly without changing facts."
+    )
+    user = f"TITLE:\n{title}\n\nLEAD:\n{desc}\n"
+    try:
+        r = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "system", "content": sys}, {"role": "user", "content": user}],
+            response_format={"type": "json_object"},
+            temperature=0.22,
+            max_tokens=240,
+        )
+        raw_j = (r.choices[0].message.content or "").strip()
+        d = json.loads(raw_j)
+    except Exception as e:
+        print(f"[card_ko] openai request/json failed: {repr(e)}")
+        return None
+    l1 = (d.get("line1") or "").strip()
+    l2 = (d.get("line2") or "").strip()
+    if len(l1) < 6:
+        return None
+    print("[card_ko] openai korean headline ok")
+    return l1[:110], l2[:240]
+
+
+def _card_title_subtitle_from_article(article: Dict[str, Any]) -> Tuple[str, str]:
+    """OpenAI 한글 라인이 있으면 우선, 없으면 영문 제목·요약."""
+    ko1 = str(article.get("_ko_line1") or "").strip()
+    ko2 = str(article.get("_ko_line2") or "").strip()
+    if ko1:
+        return _clamp_title(ko1, max_len=110), (ko2[:280] if ko2 else "")
+    return _clamp_title(article.get("title", "") or ""), _subtitle_from_article(article)
 
 
 def _font_candidates() -> List[str]:
@@ -412,8 +481,7 @@ def _render_template_photo(article: Dict[str, Any], out_path: str) -> str:
     if Image is None:
         raise RuntimeError("Pillow(PIL) 미설치")
 
-    title = _clamp_title(article.get("title", "") or "")
-    subtitle = _subtitle_from_article(article)
+    title, subtitle = _card_title_subtitle_from_article(article)
     source = news_module.article_source_name(article)
 
     bg_url = _article_image_url(article)
@@ -555,8 +623,7 @@ def _render_template_badge(article: Dict[str, Any], out_path: str) -> str:
     """IREN형: 쿨톤 배경 + 중앙 그린 배지(티커) + 하단 제목 스택."""
     if Image is None:
         raise RuntimeError("Pillow(PIL) 미설치")
-    title = _clamp_title(article.get("title", "") or "")
-    subtitle = _subtitle_from_article(article)
+    title, subtitle = _card_title_subtitle_from_article(article)
     source = news_module.article_source_name(article)
 
     base = _tech_datacenter_background(W, H).convert("RGBA")
@@ -609,8 +676,7 @@ def _render_template_quote(article: Dict[str, Any], out_path: str) -> str:
     """HipHub형: 웜톤 배경 + 인용 박스 + 하단 대제목."""
     if Image is None:
         raise RuntimeError("Pillow(PIL) 미설치")
-    title = _clamp_title(article.get("title", "") or "")
-    subtitle = _subtitle_from_article(article)
+    title, subtitle = _card_title_subtitle_from_article(article)
     source = news_module.article_source_name(article)
 
     base = Image.new("RGB", (W, H))
@@ -683,7 +749,10 @@ def render_single_card(article: Dict[str, Any], out_path: str) -> str:
 
 def build_telegram_caption(article: Dict[str, Any]) -> str:
     """텔레그램 캡션(1024자). 기본 minimal — 이미지에 본문이 있으므로 제목+링크 위주."""
-    title = news_module.clean_spaces(article.get("title", "") or "")
+    ko1 = str(article.get("_ko_line1") or "").strip()
+    title = news_module.clean_spaces(
+        ko1 if ko1 else (article.get("title", "") or "")
+    )
     desc = _subtitle_from_article(article)
     src = news_module.article_source_name(article)
     url = str(article.get("url") or "").strip()
@@ -742,7 +811,10 @@ def _render_minimal_fallback_card(article: Dict[str, Any], out_path: str) -> str
     """고급 템플릿 실패 시에도 JPEG는 반드시 나오게 하는 최소 카드."""
     if Image is None:
         raise RuntimeError("Pillow(PIL) 미설치")
-    title = news_module.clean_spaces(article.get("title", "") or "")[:220]
+    ko1 = str(article.get("_ko_line1") or "").strip()
+    title = news_module.clean_spaces(
+        ko1 if ko1 else (article.get("title", "") or "")
+    )[:220]
     source = news_module.article_source_name(article) or "News"
     base = _solid_background(W, H).convert("RGBA")
     overlay = Image.new("RGBA", base.size, (0, 0, 0, 0))
@@ -814,6 +886,11 @@ def run_telegram_single_card(
         f"score={news_module.score_article(article)} "
         f"source={news_module.article_source_name(article)!r}"
     )
+
+    article = dict(article)
+    ko_lines = _try_openai_korean_card_lines(article)
+    if ko_lines:
+        article["_ko_line1"], article["_ko_line2"] = ko_lines
 
     os.makedirs(out_dir, exist_ok=True)
     safe_key = news_module.dedup_key(article)[:40].replace(" ", "_")
