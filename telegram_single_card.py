@@ -77,8 +77,8 @@ def _clamp_title(title: str, max_len: int = 140) -> str:
 def _subtitle_from_article(article: Dict[str, Any]) -> str:
     desc = (article.get("description") or article.get("content") or "").strip()
     desc = re.sub(r"\s+", " ", desc)
-    if len(desc) > 160:
-        return desc[:157] + "…"
+    if len(desc) > 280:
+        return desc[:277] + "…"
     return desc
 
 
@@ -116,25 +116,27 @@ def _cover_background(img: Image.Image, tw: int, th: int) -> Image.Image:
 
 
 def _solid_background(tw: int, th: int) -> Image.Image:
-    base = Image.new("RGB", (tw, th), (12, 12, 18))
+    """무이미지일 때 쓰는 배경 — 거의 순흑 대신 뉴스레터형 슬레이트 그라데이션."""
+    base = Image.new("RGB", (tw, th))
     g = ImageDraw.Draw(base)
     for y in range(th):
         t = y / max(th - 1, 1)
-        r = int(12 + t * 28)
-        b = int(18 + t * 40)
-        g.line([(0, y), (tw, y)], fill=(r, 12, b))
+        r = int(32 - t * 18)
+        gg = int(36 - t * 20)
+        b = int(58 - t * 32)
+        g.line([(0, y), (tw, y)], fill=(max(r, 12), max(gg, 14), max(b, 22)))
     return base
 
 
 def _apply_bottom_gradient(base: Image.Image) -> None:
-    """In-place bottom darken for text legibility (강한 편)."""
+    """하단만 살짝 눌러 가독성 확보(이전보다 약하게 — 전체가 보라·검정으로 묻히지 않게)."""
     overlay = Image.new("RGBA", base.size, (0, 0, 0, 0))
     d = ImageDraw.Draw(overlay)
     y0 = base.height - BOTTOM_ZONE
     for y in range(y0, base.height):
         t = (y - y0) / max(BOTTOM_ZONE - 1, 1)
-        alpha = int(40 + 215 * (t**1.05))
-        d.line([(0, y), (base.width, y)], fill=(0, 0, 0, min(alpha, 245)))
+        alpha = int(12 + 100 * (t**1.08))
+        d.line([(0, y), (base.width, y)], fill=(0, 0, 0, min(alpha, 155)))
     base.alpha_composite(overlay)
 
 
@@ -280,6 +282,13 @@ def _headline_split_photo(title: str, subtitle: str) -> Tuple[str, str]:
     """BoA/삼성형: 첫 줄 강조 + 둘째 줄 설명."""
     title = (title or "").strip()
     subtitle = (subtitle or "").strip()
+    if " due to " in title and len(title) > 56:
+        a, b = title.split(" due to ", 1)
+        a, b = a.strip(), b.strip()
+        if len(a) >= 18:
+            line1 = a + " —"
+            line2 = ("Due to " + b + (" " + subtitle if subtitle else "")).strip()
+            return line1, line2[:400]
     if ";" in title and len(title) > 72:
         a, b = title.split(";", 1)
         a, b = a.strip(), b.strip()
@@ -369,17 +378,24 @@ def _render_template_photo(article: Dict[str, Any], out_path: str) -> str:
     brand = (os.getenv("CARD_BRAND_LABEL") or "MARKET CARD").strip()
     if brand:
         f_brand = _load_font(26)
-        _draw_text_outlined(draw, (PAD_X, y_brand), brand, f_brand)
+        _draw_text_outlined(
+            draw,
+            (PAD_X, y_brand),
+            brand,
+            f_brand,
+            fill=(210, 220, 255, 255),
+            outline=(16, 20, 36, 230),
+        )
 
     max_text_w = W - 2 * PAD_X
     line1, line2 = _headline_split_photo(title, subtitle)
     combined = len(line1) + len(line2)
     if combined > 260:
-        h1s, h2s, m1, m2, y0_off = 34, 24, 3, 8, 24
+        h1s, h2s, m1, m2, y0_off = 36, 26, 3, 9, 20
     elif combined > 190:
-        h1s, h2s, m1, m2, y0_off = 40, 28, 3, 6, 32
+        h1s, h2s, m1, m2, y0_off = 42, 30, 3, 7, 28
     elif combined > 130:
-        h1s, h2s, m1, m2, y0_off = 48, 32, 2, 5, 40
+        h1s, h2s, m1, m2, y0_off = 48, 32, 2, 6, 38
     else:
         h1s, h2s, m1, m2, y0_off = 56, 40, 2, 4, 52
 
@@ -404,24 +420,56 @@ def _render_template_photo(article: Dict[str, Any], out_path: str) -> str:
         y_cursor += lh1
     for ln in h2_lines:
         y_cursor += lh2
-    panel_bottom = min(H - 44, y_cursor + 22)
-    panel_rect = [PAD_X - 20, y0 - 20, W - PAD_X + 20, panel_bottom]
+    panel_bottom = min(H - 44, y_cursor + 26)
+    panel_rect = [PAD_X - 22, y0 - 22, W - PAD_X + 22, panel_bottom]
+    panel_fill = (34, 40, 58, 238)
+    panel_outline = (96, 108, 140, 255)
     try:
-        draw.rounded_rectangle(panel_rect, radius=18, fill=(0, 0, 0, 155))
+        draw.rounded_rectangle(
+            panel_rect,
+            radius=22,
+            fill=panel_fill,
+            outline=panel_outline,
+            width=2,
+        )
     except Exception:
-        draw.rectangle(panel_rect, fill=(0, 0, 0, 155))
+        try:
+            draw.rounded_rectangle(panel_rect, radius=22, fill=panel_fill)
+        except Exception:
+            draw.rectangle(panel_rect, fill=(34, 40, 58))
 
     y_cursor = y0
     for ln in h1_lines:
-        _draw_text_outlined(draw, (PAD_X, y_cursor), ln, f_h1)
+        _draw_text_outlined(
+            draw,
+            (PAD_X, y_cursor),
+            ln,
+            f_h1,
+            fill=(255, 255, 255, 255),
+            outline=(12, 16, 28, 245),
+        )
         y_cursor += lh1
     for ln in h2_lines:
-        _draw_text_outlined(draw, (PAD_X, y_cursor), ln, f_h2)
+        _draw_text_outlined(
+            draw,
+            (PAD_X, y_cursor),
+            ln,
+            f_h2,
+            fill=(236, 240, 248, 255),
+            outline=(10, 14, 24, 200),
+        )
         y_cursor += lh2
 
     src_line = f"출처: {source}" if source else "출처: 확인됨(통신사/도메인 화이트리스트)"
     f_src = _load_font(24)
-    _draw_text_outlined(draw, (PAD_X, H - 56), src_line, f_src, fill=(220, 228, 236, 255))
+    _draw_text_outlined(
+        draw,
+        (PAD_X, H - 56),
+        src_line,
+        f_src,
+        fill=(190, 200, 220, 255),
+        outline=(8, 10, 18, 220),
+    )
 
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     base.convert("RGB").save(out_path, "JPEG", quality=92, optimize=True)
