@@ -211,6 +211,8 @@ def best_single_card_candidate_relaxed(
             continue
         if not news_module.has_market_impact(a):
             continue
+        if news_module.is_press_release_wire(a):
+            continue
         if not _relaxed_body_passes(a):
             continue
         url = str(a.get("url") or "").strip()
@@ -241,6 +243,8 @@ def best_single_card_candidate(
         if not news_module.trusted_article(a):
             continue
         if not news_module.has_market_impact(a):
+            continue
+        if news_module.is_press_release_wire(a):
             continue
         if news_module.is_low_quality_text(a):
             continue
@@ -276,6 +280,13 @@ def _headline_split_photo(title: str, subtitle: str) -> Tuple[str, str]:
     """BoA/삼성형: 첫 줄 강조 + 둘째 줄 설명."""
     title = (title or "").strip()
     subtitle = (subtitle or "").strip()
+    if ";" in title and len(title) > 72:
+        a, b = title.split(";", 1)
+        a, b = a.strip(), b.strip()
+        if len(a) >= 20:
+            line1 = a + ";"
+            line2 = (b + (" " + subtitle if subtitle else "")).strip()
+            return line1, line2[:380]
     if "," in title and len(title.split(",", 1)[0]) < 96:
         a, b = title.split(",", 1)
         line1 = a.strip() + ","
@@ -362,12 +373,22 @@ def _render_template_photo(article: Dict[str, Any], out_path: str) -> str:
 
     max_text_w = W - 2 * PAD_X
     line1, line2 = _headline_split_photo(title, subtitle)
-    f_h1 = _load_font(56)
-    f_h2 = _load_font(40)
-    h1_lines = _wrap_lines(draw, line1, f_h1, max_text_w)[:2]
+    combined = len(line1) + len(line2)
+    if combined > 260:
+        h1s, h2s, m1, m2, y0_off = 34, 24, 3, 8, 24
+    elif combined > 190:
+        h1s, h2s, m1, m2, y0_off = 40, 28, 3, 6, 32
+    elif combined > 130:
+        h1s, h2s, m1, m2, y0_off = 48, 32, 2, 5, 40
+    else:
+        h1s, h2s, m1, m2, y0_off = 56, 40, 2, 4, 52
+
+    f_h1 = _load_font(h1s)
+    f_h2 = _load_font(h2s)
+    h1_lines = _wrap_lines(draw, line1, f_h1, max_text_w)[:m1]
     if not h1_lines and line1:
         h1_lines = [line1[:100]]
-    h2_lines = _wrap_lines(draw, line2, f_h2, max_text_w)[:4] if line2 else []
+    h2_lines = _wrap_lines(draw, line2, f_h2, max_text_w)[:m2] if line2 else []
 
     body_chk = line1 + line2
     if _has_cjk(body_chk) and not os.getenv("CARD_FONT_PATH"):
@@ -375,12 +396,14 @@ def _render_template_photo(article: Dict[str, Any], out_path: str) -> str:
             "[telegram_single_card] CJK 문자 포함 — Railway/Linux에서는 CARD_FONT_PATH(NotoSansKR 등) 설정 권장"
         )
 
-    y0 = H - BOTTOM_ZONE + 52
+    lh1 = max(int(h1s * 1.16), 26)
+    lh2 = max(int(h2s * 1.16), 22)
+    y0 = H - BOTTOM_ZONE + y0_off
     y_cursor = y0
     for ln in h1_lines:
-        y_cursor += int(56 * 1.22)
+        y_cursor += lh1
     for ln in h2_lines:
-        y_cursor += int(40 * 1.22)
+        y_cursor += lh2
     panel_bottom = min(H - 44, y_cursor + 22)
     panel_rect = [PAD_X - 20, y0 - 20, W - PAD_X + 20, panel_bottom]
     try:
@@ -391,10 +414,10 @@ def _render_template_photo(article: Dict[str, Any], out_path: str) -> str:
     y_cursor = y0
     for ln in h1_lines:
         _draw_text_outlined(draw, (PAD_X, y_cursor), ln, f_h1)
-        y_cursor += int(56 * 1.22)
+        y_cursor += lh1
     for ln in h2_lines:
         _draw_text_outlined(draw, (PAD_X, y_cursor), ln, f_h2)
-        y_cursor += int(40 * 1.22)
+        y_cursor += lh2
 
     src_line = f"출처: {source}" if source else "출처: 확인됨(통신사/도메인 화이트리스트)"
     f_src = _load_font(24)

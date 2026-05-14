@@ -227,6 +227,46 @@ def is_low_quality_text(article: Dict[str, Any]) -> bool:
     return False
 
 
+def is_press_release_wire(article: Dict[str, Any]) -> bool:
+    """
+    정식 매체 도메인에 올라오는 PR·배포용 보도(예: AP press-release + PR Newswire) 제외.
+    """
+    raw_u = str(article.get("url") or "").strip()
+    u = raw_u.lower()
+    path = ""
+    try:
+        path = urlparse(u).path.lower() if u else ""
+    except Exception:
+        path = ""
+    if "/press-release" in path or "/press_releases/" in path or "/press-room/" in path:
+        return True
+    if any(
+        x in u
+        for x in (
+            "prnewswire",
+            "pr-newswire",
+            "businesswire.com",
+            "globenewswire",
+            "accesswire.com",
+        )
+    ):
+        return True
+    title_l = clean_spaces(article.get("title", "") or "").lower()
+    blob = article_text(article)
+    needles = (
+        "issued on behalf",
+        "on behalf of",
+        "not for distribution",
+        "for immediate release",
+        "press release:",
+        "(press release)",
+        "pr newswire",
+        "via business wire",
+        "globenewswire",
+    )
+    return any(n in title_l or n in blob for n in needles)
+
+
 def is_breaking_candidate(article: Dict[str, Any]) -> bool:
     text = article_text(article)
     title = clean_spaces(article.get("title", "")).lower()
@@ -283,8 +323,11 @@ def score_breaking_article(article: Dict[str, Any]) -> int:
 def fetch_news(limit: int = 40, hours_back: int = 36) -> List[Dict[str, Any]]:
     cached = get_cached_articles(max_age_hours=6)
     if USE_CACHED_NEWS and cached:
-        print("[비용절약] USE_CACHED_NEWS=true, 캐시 뉴스 사용")
-        return cached[:limit]
+        filtered_cache = [a for a in cached if not is_press_release_wire(a)]
+        if filtered_cache:
+            print("[비용절약] USE_CACHED_NEWS=true, 캐시 뉴스 사용")
+            return filtered_cache[:limit]
+        print("[뉴스] 캐시가 PR/배포문만 포함 — API로 다시 가져옵니다")
     if not API_KEY:
         return cached
 
@@ -314,6 +357,8 @@ def fetch_news(limit: int = 40, hours_back: int = 36) -> List[Dict[str, Any]]:
         if not has_high_impact(article):
             continue
         if is_low_quality_text(article):
+            continue
+        if is_press_release_wire(article):
             continue
         if not published_recent_enough(article, hours=hours_back):
             continue
