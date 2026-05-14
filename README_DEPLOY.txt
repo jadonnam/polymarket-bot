@@ -44,6 +44,7 @@
 
 3) 생성물
 - 단일 카드(Telegram): `output_telegram_card/` 아래 JPEG 1장 + 캡션(코드에서 조합)
+- `CARD_TEMPLATE=photo`: 배경은 `TELEGRAM_CARD_USE_NEWS_IMAGE`·urlToImage 또는 **`assets/fallbacks/*.jpg`**(키워드 매칭) → BoA/삼성형(전면 사진 + 하단 그라데이션 + 좌측 헤드라인)
 - 레거시 5장 모드(CARD_NEWS_MODE=true 등): `output_cardnews/` 또는 `output_marketfact/` 등 기존 경로
 
 4) 전송 정책

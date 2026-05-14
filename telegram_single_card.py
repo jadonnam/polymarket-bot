@@ -89,6 +89,74 @@ def _article_image_url(article: Dict[str, Any]) -> str:
     return ""
 
 
+def _fallbacks_dir() -> str:
+    return os.path.normpath(os.path.join(os.path.dirname(__file__), "assets", "fallbacks"))
+
+
+def _pick_fallback_background_path(article: Dict[str, Any]) -> Optional[str]:
+    """BoA/삼성형 레퍼런스용 스톡 배경 — 키워드별 assets/fallbacks/*.jpg"""
+    root = _fallbacks_dir()
+    title = news_module.clean_spaces(article.get("title", "") or "").lower()
+    desc = news_module.clean_spaces(
+        article.get("description", "") or article.get("content", "") or ""
+    ).lower()
+    blob = f"{title} {desc}"
+
+    rules: List[Tuple[Tuple[str, ...], str]] = [
+        (
+            ("iran", "israel", "war", "attack", "missile", "ceasefire", "military"),
+            "market_01.jpg",
+        ),
+        (
+            (
+                "semiconductor",
+                "chip",
+                "nvidia",
+                "data center",
+                "ai ",
+                "삼성",
+                "samsung",
+                "calbee",
+                "packaging",
+            ),
+            "market_02.jpg",
+        ),
+        (("oil", "crude", "wti", "brent", "gold", "silver", "commodit"), "market_03.jpg"),
+        (("japan", "korea", "china", "yuan", "yen", "asia", "tokyo"), "market_04.jpg"),
+        (("fed", "inflation", "cpi", "tariff", "rate cut", "treasury", "dollar"), "market_05.jpg"),
+    ]
+    for keys, fname in rules:
+        if any(k in blob for k in keys):
+            p = os.path.join(root, fname)
+            if os.path.isfile(p):
+                return p
+    default = os.path.join(root, "default_market.jpg")
+    return default if os.path.isfile(default) else None
+
+
+def _open_fallback_cover(path: str, tw: int, th: int) -> Optional[Image.Image]:
+    if Image is None:
+        return None
+    try:
+        raw = Image.open(path).convert("RGB")
+        return _cover_background(raw, tw, th)
+    except Exception as e:
+        print(f"[telegram_single_card] fallback bg open failed {path!r}: {repr(e)}")
+        return None
+
+
+def _apply_photo_bottom_gradient(img: Image.Image) -> None:
+    """전면 사진 위 하단만 눌러 제목 대비(레퍼런스 BoA/삼성형)."""
+    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    d = ImageDraw.Draw(overlay)
+    y0 = int(img.height * 0.46)
+    for y in range(y0, img.height):
+        t = (y - y0) / max(img.height - y0 - 1, 1)
+        alpha = int(25 + 215 * (t**0.92))
+        d.line([(0, y), (img.width, y)], fill=(0, 0, 0, min(alpha, 238)))
+    img.alpha_composite(overlay)
+
+
 def _download_image(url: str, timeout: int = 12) -> Optional[Image.Image]:
     if not url or Image is None:
         return None
@@ -286,8 +354,11 @@ def _headline_split_photo(title: str, subtitle: str) -> Tuple[str, str]:
         a, b = title.split(" due to ", 1)
         a, b = a.strip(), b.strip()
         if len(a) >= 18:
-            line1 = a + " —"
-            line2 = ("Due to " + b + (" " + subtitle if subtitle else "")).strip()
+            rest = b.strip()
+            if not rest.lower().startswith(("the ", "a ", "an ")):
+                rest = "Due to " + rest
+            line1 = a.strip() + " —"
+            line2 = (rest + (" " + subtitle if subtitle else "")).strip()
             return line1, line2[:400]
     if ";" in title and len(title) > 72:
         a, b = title.split(";", 1)
@@ -333,6 +404,11 @@ def _tech_datacenter_background(tw: int, th: int) -> Image.Image:
 
 
 def _render_template_photo(article: Dict[str, Any], out_path: str) -> str:
+    """
+    BoA / 삼성형 레퍼런스: 전면 사진 + 하단 그라데이션 + 좌측 큰 제목(패널 박스 없음).
+    - TELEGRAM_CARD_USE_NEWS_IMAGE=true 이고 urlToImage 유효 시 기사 이미지
+    - 아니면 assets/fallbacks 키워드 스톡 → 최후 solid
+    """
     if Image is None:
         raise RuntimeError("Pillow(PIL) 미설치")
 
@@ -341,63 +417,77 @@ def _render_template_photo(article: Dict[str, Any], out_path: str) -> str:
     source = news_module.article_source_name(article)
 
     bg_url = _article_image_url(article)
-    bg = None
+    base: Optional[Image.Image] = None
+    bg_mode = "solid"
+
     if TELEGRAM_CARD_USE_NEWS_IMAGE and bg_url:
         bg = _download_image(bg_url)
-        if bg is not None and ImageFilter is not None:
-            try:
-                bg = bg.filter(ImageFilter.GaussianBlur(radius=2))
-            except Exception:
-                pass
-        print(f"[telegram_single_card] bg_mode=article_image url={bg_url[:60]}…")
-    else:
-        if bg_url and not TELEGRAM_CARD_USE_NEWS_IMAGE:
-            print(
-                "[telegram_single_card] bg_mode=solid "
-                "(TELEGRAM_CARD_USE_NEWS_IMAGE=false — urlToImage는 기사와 불일치할 수 있음)"
-            )
-        else:
-            print("[telegram_single_card] bg_mode=solid (no usable urlToImage)")
+        if bg is not None:
+            if ImageFilter is not None:
+                try:
+                    bg = bg.filter(ImageFilter.GaussianBlur(radius=1.2))
+                except Exception:
+                    pass
+            base = _cover_background(bg, W, H)
+            bg_mode = "article_image"
+            print(f"[telegram_single_card] bg_mode=article_image url={bg_url[:72]}…")
 
-    if bg is not None:
-        base = _cover_background(bg, W, H)
-    else:
-        base = _solid_background(W, H)
+    if base is None:
+        fp = _pick_fallback_background_path(article)
+        if fp:
+            base = _open_fallback_cover(fp, W, H)
+            if base is not None:
+                bg_mode = f"fallback:{os.path.basename(fp)}"
+                print(f"[telegram_single_card] bg_mode={bg_mode}")
+        if base is None:
+            if bg_url and not TELEGRAM_CARD_USE_NEWS_IMAGE:
+                print(
+                    "[telegram_single_card] bg_mode=solid "
+                    "(no fallback file — TELEGRAM_CARD_USE_NEWS_IMAGE=false)"
+                )
+            else:
+                print("[telegram_single_card] bg_mode=solid (no usable image)")
+            base = _solid_background(W, H)
+            bg_mode = "solid"
 
-    base = base.convert("RGBA")
-    _apply_bottom_gradient(base)
-    draw = ImageDraw.Draw(base)
+    rgba = base.convert("RGBA")
+    _apply_photo_bottom_gradient(rgba)
+    draw = ImageDraw.Draw(rgba)
 
     top_left = (os.getenv("CARD_TOP_LEFT_LABEL") or "").strip()
-    y_brand = 42
+    brand = (os.getenv("CARD_BRAND_LABEL") or "").strip()
     if top_left:
         f_tl = _load_font(22)
-        _draw_text_outlined(draw, (PAD_X, 36), top_left, f_tl, fill=(248, 248, 252, 255))
-        y_brand = 78
-
-    brand = (os.getenv("CARD_BRAND_LABEL") or "MARKET CARD").strip()
-    if brand:
-        f_brand = _load_font(26)
         _draw_text_outlined(
             draw,
-            (PAD_X, y_brand),
+            (PAD_X, 40),
+            top_left,
+            f_tl,
+            fill=(252, 252, 255, 255),
+            outline=(6, 8, 18, 200),
+        )
+    elif brand:
+        f_tl = _load_font(22)
+        _draw_text_outlined(
+            draw,
+            (PAD_X, 40),
             brand,
-            f_brand,
-            fill=(210, 220, 255, 255),
-            outline=(16, 20, 36, 230),
+            f_tl,
+            fill=(252, 252, 255, 255),
+            outline=(6, 8, 18, 200),
         )
 
     max_text_w = W - 2 * PAD_X
     line1, line2 = _headline_split_photo(title, subtitle)
     combined = len(line1) + len(line2)
     if combined > 260:
-        h1s, h2s, m1, m2, y0_off = 36, 26, 3, 9, 20
+        h1s, h2s, m1, m2 = 38, 28, 3, 7
     elif combined > 190:
-        h1s, h2s, m1, m2, y0_off = 42, 30, 3, 7, 28
+        h1s, h2s, m1, m2 = 44, 32, 2, 6
     elif combined > 130:
-        h1s, h2s, m1, m2, y0_off = 48, 32, 2, 6, 38
+        h1s, h2s, m1, m2 = 52, 34, 2, 5
     else:
-        h1s, h2s, m1, m2, y0_off = 56, 40, 2, 4, 52
+        h1s, h2s, m1, m2 = 60, 38, 2, 4
 
     f_h1 = _load_font(h1s)
     f_h2 = _load_font(h2s)
@@ -412,68 +502,52 @@ def _render_template_photo(article: Dict[str, Any], out_path: str) -> str:
             "[telegram_single_card] CJK 문자 포함 — Railway/Linux에서는 CARD_FONT_PATH(NotoSansKR 등) 설정 권장"
         )
 
-    lh1 = max(int(h1s * 1.16), 26)
-    lh2 = max(int(h2s * 1.16), 22)
-    y0 = H - BOTTOM_ZONE + y0_off
-    y_cursor = y0
-    for ln in h1_lines:
-        y_cursor += lh1
-    for ln in h2_lines:
-        y_cursor += lh2
-    panel_bottom = min(H - 44, y_cursor + 26)
-    panel_rect = [PAD_X - 22, y0 - 22, W - PAD_X + 22, panel_bottom]
-    panel_fill = (34, 40, 58, 238)
-    panel_outline = (96, 108, 140, 255)
-    try:
-        draw.rounded_rectangle(
-            panel_rect,
-            radius=22,
-            fill=panel_fill,
-            outline=panel_outline,
-            width=2,
-        )
-    except Exception:
-        try:
-            draw.rounded_rectangle(panel_rect, radius=22, fill=panel_fill)
-        except Exception:
-            draw.rectangle(panel_rect, fill=(34, 40, 58))
+    lh1 = max(int(h1s * 1.12), 28)
+    lh2 = max(int(h2s * 1.12), 24)
+    f_src = _load_font(21)
+    src_line = source if source else "AP / Reuters 등"
+    src_h = int(lh2 * 0.85)
+    gap = 18
+    block_h = len(h1_lines) * lh1 + len(h2_lines) * lh2 + gap + src_h
+    top_pad = 108 if (top_left or brand) else 72
+    y_text_top = max(top_pad, H - int(H * 0.44) - block_h // 4, H - block_h - 50)
+    y_text_top = min(y_text_top, H - block_h - 28)
 
-    y_cursor = y0
+    y = y_text_top
     for ln in h1_lines:
         _draw_text_outlined(
             draw,
-            (PAD_X, y_cursor),
+            (PAD_X, y),
             ln,
             f_h1,
             fill=(255, 255, 255, 255),
-            outline=(12, 16, 28, 245),
+            outline=(4, 6, 14, 235),
         )
-        y_cursor += lh1
+        y += lh1
     for ln in h2_lines:
         _draw_text_outlined(
             draw,
-            (PAD_X, y_cursor),
+            (PAD_X, y),
             ln,
             f_h2,
-            fill=(236, 240, 248, 255),
-            outline=(10, 14, 24, 200),
+            fill=(245, 248, 255, 255),
+            outline=(4, 6, 14, 210),
         )
-        y_cursor += lh2
+        y += lh2
 
-    src_line = f"출처: {source}" if source else "출처: 확인됨(통신사/도메인 화이트리스트)"
-    f_src = _load_font(24)
+    y += gap // 2
     _draw_text_outlined(
         draw,
-        (PAD_X, H - 56),
+        (PAD_X, min(y, H - 44)),
         src_line,
         f_src,
-        fill=(190, 200, 220, 255),
-        outline=(8, 10, 18, 220),
+        fill=(210, 218, 232, 255),
+        outline=(2, 4, 10, 200),
     )
 
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
-    base.convert("RGB").save(out_path, "JPEG", quality=92, optimize=True)
-    print(f"[telegram_single_card] wrote {out_path}")
+    rgba.convert("RGB").save(out_path, "JPEG", quality=93, optimize=True)
+    print(f"[telegram_single_card] wrote {out_path} ({bg_mode})")
     return out_path
 
 
@@ -608,12 +682,26 @@ def render_single_card(article: Dict[str, Any], out_path: str) -> str:
 
 
 def build_telegram_caption(article: Dict[str, Any]) -> str:
-    """텔레그램 캡션(1024자 제한): 제목·한 줄 요약 + 메타."""
+    """텔레그램 캡션(1024자). 기본 minimal — 이미지에 본문이 있으므로 제목+링크 위주."""
     title = news_module.clean_spaces(article.get("title", "") or "")
     desc = _subtitle_from_article(article)
     src = news_module.article_source_name(article)
     url = str(article.get("url") or "").strip()
-    parts: List[str] = []
+    minimal = (os.getenv("TELEGRAM_CAPTION_MINIMAL") or "true").lower() == "true"
+    if minimal:
+        parts: List[str] = []
+        if title:
+            parts.append("📌 " + title[:480])
+        if url:
+            parts.append(f"원문: {url}")
+        elif src:
+            parts.append(f"출처: {src}")
+        cap = "\n".join(parts).strip()
+        if len(cap) > 1020:
+            cap = cap[:1017] + "…"
+        return cap
+
+    parts = []
     if title:
         parts.append("📌 " + title[:420])
     if desc:
