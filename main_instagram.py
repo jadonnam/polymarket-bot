@@ -1083,7 +1083,9 @@ def main() -> None:
             iss_cand: Optional[Dict[str, Any]] = None
 
             if SIGNAL_DRIVEN_SEND:
-                if OFF_SCHEDULE_ISSUE_ENABLED and not FORCE_CARD_TEST:
+                # 신호 모드: OFF_SCHEDULE_ISSUE_ENABLED와 무관하게 후보·점수·쿨다운을 평가
+                # (Railway에서 OFF_SCHEDULE_ISSUE_ENABLED=false 여도 전송 판단이 되게)
+                if not FORCE_CARD_TEST:
                     cached_arts = fetch_news_articles(hours_back=36, limit=40)
                     iss_score, iss_cand = best_single_card_candidate(cached_arts)
                     if iss_cand is None:
@@ -1117,11 +1119,10 @@ def main() -> None:
                 if SIGNAL_DRIVEN_SEND:
                     print(
                         "[briefing_only] skip send: "
-                        "신호 없음 또는 차단(점수·쿨다운·URL중복 / "
-                        "OFF_SCHEDULE_ISSUE_ENABLED=false) "
+                        "신호 없음 — 후보 없음 또는 점수/쿨다운/URL중복으로 차단 "
                         f"| min_score={OFF_SCHEDULE_MIN_SCORE} "
                         f"cooldown_m={OFF_SCHEDULE_COOLDOWN_MINUTES} "
-                        f"best_score={iss_score}"
+                        f"best_score={iss_score} has_cand={iss_cand is not None}"
                     )
                 else:
                     print(
