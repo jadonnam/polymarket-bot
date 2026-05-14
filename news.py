@@ -200,6 +200,38 @@ def published_recent_enough(article: Dict[str, Any], hours: int = 36) -> bool:
         return True
 
 
+_URL_SLUG_DATE = re.compile(r"/(20\d{2})/(\d{1,2})/(\d{1,2})/")
+
+
+def article_url_slug_year_stale(article: Dict[str, Any]) -> bool:
+    """
+    원문 URL에 /YYYY/MM/DD/ 형태가 있고 YYYY가 현재 연도보다 이전이면,
+    publishedAt이 최근으로 잘못 온 재노출·구기사를 배제한다(예: .../markets/2024/05/13/...).
+    """
+    url = str(article.get("url") or "").replace("\\", "/")
+    m = _URL_SLUG_DATE.search(url)
+    if not m:
+        return False
+    try:
+        y = int(m.group(1))
+    except ValueError:
+        return False
+    return y < _now_utc().year
+
+
+def _filter_articles_freshness(
+    articles: List[Dict[str, Any]], *, hours_back: int
+) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    for a in articles or []:
+        if not published_recent_enough(a, hours=hours_back):
+            continue
+        if article_url_slug_year_stale(a):
+            continue
+        out.append(a)
+    return out
+
+
 def dedup_key(article: Dict[str, Any]) -> str:
     title = clean_spaces(article.get("title", "")).lower()
     title = re.sub(r"[^a-z0-9가-힣\s]", " ", title)
@@ -323,13 +355,19 @@ def score_breaking_article(article: Dict[str, Any]) -> int:
 def fetch_news(limit: int = 40, hours_back: int = 36) -> List[Dict[str, Any]]:
     cached = get_cached_articles(max_age_hours=6)
     if USE_CACHED_NEWS and cached:
-        filtered_cache = [a for a in cached if not is_press_release_wire(a)]
+        filtered_cache = [
+            a
+            for a in cached
+            if not is_press_release_wire(a)
+            and published_recent_enough(a, hours=hours_back)
+            and not article_url_slug_year_stale(a)
+        ]
         if filtered_cache:
-            print("[비용절약] USE_CACHED_NEWS=true, 캐시 뉴스 사용")
+            print("[비용절약] USE_CACHED_NEWS=true, 캐시 뉴스 사용(기사별 날짜·URL 연도 재검증)")
             return filtered_cache[:limit]
-        print("[뉴스] 캐시가 PR/배포문만 포함 — API로 다시 가져옵니다")
+        print("[뉴스] 캐시 사용 불가(만료·PR·날짜·URL연도 제외 등) — API로 다시 가져옵니다")
     if not API_KEY:
-        return cached
+        return _filter_articles_freshness(cached, hours_back=hours_back)
 
     params = {
         "q": SEARCH_QUERY,
@@ -342,10 +380,10 @@ def fetch_news(limit: int = 40, hours_back: int = 36) -> List[Dict[str, Any]]:
     try:
         data = requests.get("https://newsapi.org/v2/everything", params=params, timeout=20).json()
     except Exception:
-        return cached
+        return _filter_articles_freshness(cached, hours_back=hours_back)
     if data.get("status") != "ok":
         print("뉴스 API 응답 이상:", data)
-        return cached
+        return _filter_articles_freshness(cached, hours_back=hours_back)
 
     filtered: List[Dict[str, Any]] = []
     seen = set()
@@ -362,6 +400,8 @@ def fetch_news(limit: int = 40, hours_back: int = 36) -> List[Dict[str, Any]]:
             continue
         if not published_recent_enough(article, hours=hours_back):
             continue
+        if article_url_slug_year_stale(article):
+            continue
         key = dedup_key(article)
         if not key or key in seen:
             continue
@@ -372,7 +412,7 @@ def fetch_news(limit: int = 40, hours_back: int = 36) -> List[Dict[str, Any]]:
     if filtered:
         save_cache(filtered[:limit])
         return filtered[:limit]
-    return cached
+    return _filter_articles_freshness(cached, hours_back=hours_back)
 
 
 def fetch_breaking_news(limit: int = 20, hours_back: int = 12) -> List[Dict[str, Any]]:

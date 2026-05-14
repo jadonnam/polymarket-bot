@@ -151,11 +151,32 @@ def _subtitle_from_article(article: Dict[str, Any]) -> str:
     return desc
 
 
+_DEFAULT_REJECT_IMG_SUBSTR = (
+    "tradingview.com,/charts/,chart-img,cryptocompare,price-chart,"
+    "chart.googleapis,ohlc,candlestick"
+)
+
+
+def _article_image_url_blocked(url: str) -> bool:
+    """차트·위젯 썸네일은 전면 배경으로 쓰면 제목이 묻힘 — 기본 차단."""
+    u = (url or "").lower().strip()
+    if not u:
+        return True
+    extra = (os.getenv("TELEGRAM_CARD_REJECT_IMAGE_SUBSTR") or "").strip().lower()
+    parts = [p.strip() for p in _DEFAULT_REJECT_IMG_SUBSTR.split(",") if p.strip()]
+    if extra:
+        parts.extend([p.strip() for p in extra.split(",") if p.strip()])
+    return any(p and p in u for p in parts)
+
+
 def _article_image_url(article: Dict[str, Any]) -> str:
     u = str(article.get("urlToImage") or "").strip()
-    if u.lower().startswith("http"):
-        return u
-    return ""
+    if not u.lower().startswith("http"):
+        return ""
+    if _article_image_url_blocked(u):
+        print(f"[telegram_single_card] urlToImage skipped (chart/widget): {u[:100]}…")
+        return ""
+    return u
 
 
 def _fallbacks_dir() -> str:
@@ -192,7 +213,23 @@ def _pick_fallback_background_path(article: Dict[str, Any]) -> Optional[str]:
         ),
         (("oil", "crude", "wti", "brent", "gold", "silver", "commodit"), "market_03.jpg"),
         (("japan", "korea", "china", "yuan", "yen", "asia", "tokyo"), "market_04.jpg"),
-        (("fed", "inflation", "cpi", "tariff", "rate cut", "treasury", "dollar"), "market_05.jpg"),
+        (
+            (
+                "fed",
+                "inflation",
+                "cpi",
+                "tariff",
+                "rate cut",
+                "treasury",
+                "dollar",
+                "bitcoin",
+                "btc",
+                "ethereum",
+                "eth",
+                "crypto",
+            ),
+            "market_05.jpg",
+        ),
     ]
     for keys, fname in rules:
         if any(k in blob for k in keys):
@@ -325,6 +362,13 @@ def _wrap_lines(draw: Any, text: str, font: Any, max_width: int) -> List[str]:
     return lines[:9]
 
 
+def _single_card_max_age_hours() -> int:
+    try:
+        return max(12, int((os.getenv("SINGLE_CARD_MAX_ARTICLE_AGE_HOURS") or "48").strip()))
+    except ValueError:
+        return 48
+
+
 def _relaxed_body_passes(article: Dict[str, Any]) -> bool:
     """Strict `is_low_quality_text`는 본문 40자 미만을 배제 — 짧은 통신 요약도 카드로 쓸 수 있게 완화."""
     title = news_module.clean_spaces(article.get("title", "") or "")
@@ -345,12 +389,17 @@ def best_single_card_candidate_relaxed(
 ) -> Tuple[int, Optional[Dict[str, Any]]]:
     best_s = -1
     best_a: Optional[Dict[str, Any]] = None
+    max_h = _single_card_max_age_hours()
     for a in articles or []:
         if not news_module.trusted_article(a):
             continue
         if not news_module.has_market_impact(a):
             continue
         if news_module.is_press_release_wire(a):
+            continue
+        if not news_module.published_recent_enough(a, hours=max_h):
+            continue
+        if news_module.article_url_slug_year_stale(a):
             continue
         if not _relaxed_body_passes(a):
             continue
@@ -378,6 +427,7 @@ def best_single_card_candidate(
     """
     best_s = -1
     best_a: Optional[Dict[str, Any]] = None
+    max_h = _single_card_max_age_hours()
     for a in articles or []:
         if not news_module.trusted_article(a):
             continue
@@ -386,6 +436,10 @@ def best_single_card_candidate(
         if news_module.is_press_release_wire(a):
             continue
         if news_module.is_low_quality_text(a):
+            continue
+        if not news_module.published_recent_enough(a, hours=max_h):
+            continue
+        if news_module.article_url_slug_year_stale(a):
             continue
         url = str(a.get("url") or "").strip()
         if not url.lower().startswith("https://"):
