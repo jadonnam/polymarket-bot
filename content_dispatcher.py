@@ -1,5 +1,6 @@
 import json
 import os
+import time
 from typing import Iterable, Optional
 
 import requests
@@ -94,19 +95,64 @@ def send_storage_video(path: str, caption: str = "") -> None:
     res.raise_for_status()
 
 
+def _telegram_response_ok(res: requests.Response) -> bool:
+    if res.status_code != 200:
+        return False
+    try:
+        return bool(res.json().get("ok"))
+    except Exception:
+        return False
+
+
+def _sleep_backoff(attempt: int) -> None:
+    time.sleep(min(8.0, 1.2 * (2**attempt)))
+
+
 def send_storage_image(path: str, caption: str = "") -> None:
     _check_storage()
     if DRY_RUN:
         print(f"[DRY_RUN] send_storage_image: {path} | {caption[:120]}")
         return
-    with open(path, "rb") as f:
-        res = requests.post(
-            _url("sendPhoto"),
-            data={"chat_id": STORAGE_CHAT_ID, "caption": caption},
-            files={"photo": f},
-            timeout=60,
-        )
-    res.raise_for_status()
+    if not path or not os.path.isfile(path):
+        raise FileNotFoundError(f"send_storage_image: missing file {path!r}")
+    last: Optional[Exception] = None
+    cap = (caption or "")[:1024]
+    for attempt in range(4):
+        try:
+            with open(path, "rb") as f:
+                res = requests.post(
+                    _url("sendPhoto"),
+                    data={"chat_id": STORAGE_CHAT_ID, "caption": cap},
+                    files={"photo": f},
+                    timeout=90,
+                )
+            if _telegram_response_ok(res):
+                return
+            try:
+                desc = res.json().get("description", res.text[:300])
+            except Exception:
+                desc = res.text[:300]
+            last = RuntimeError(f"Telegram sendPhoto not ok: {desc}")
+            if res.status_code == 200:
+                raise last
+            if res.status_code == 429 or (isinstance(desc, str) and "retry" in str(desc).lower()):
+                if attempt < 3:
+                    _sleep_backoff(attempt)
+                    continue
+                raise last
+            if 500 <= res.status_code < 600 and attempt < 3:
+                _sleep_backoff(attempt)
+                continue
+            res.raise_for_status()
+        except (requests.RequestException, OSError) as e:
+            last = e
+            if attempt < 3:
+                _sleep_backoff(attempt)
+                continue
+            raise
+    if last:
+        raise last
+    raise RuntimeError("send_storage_image: exhausted retries")
 
 
 def send_storage_document(path: str, caption: str = "") -> None:
@@ -130,12 +176,46 @@ def send_storage_message(text: str) -> None:
         print("[DRY_RUN] send_storage_message")
         print(str(text)[:500])
         return
-    res = requests.post(
-        _url("sendMessage"),
-        data={"chat_id": STORAGE_CHAT_ID, "text": text, "disable_web_page_preview": "true"},
-        timeout=30,
-    )
-    res.raise_for_status()
+    body = (text or "")[:4096]
+    last: Optional[Exception] = None
+    for attempt in range(4):
+        try:
+            res = requests.post(
+                _url("sendMessage"),
+                data={
+                    "chat_id": STORAGE_CHAT_ID,
+                    "text": body,
+                    "disable_web_page_preview": "true",
+                },
+                timeout=45,
+            )
+            if _telegram_response_ok(res):
+                return
+            try:
+                desc = res.json().get("description", res.text[:300])
+            except Exception:
+                desc = res.text[:300]
+            last = RuntimeError(f"Telegram sendMessage not ok: {desc}")
+            if res.status_code == 200:
+                raise last
+            if res.status_code == 429 or (isinstance(desc, str) and "retry" in str(desc).lower()):
+                if attempt < 3:
+                    _sleep_backoff(attempt)
+                    continue
+                raise last
+            if 500 <= res.status_code < 600 and attempt < 3:
+                _sleep_backoff(attempt)
+                continue
+            res.raise_for_status()
+        except (requests.RequestException, OSError) as e:
+            last = e
+            if attempt < 3:
+                _sleep_backoff(attempt)
+                continue
+            raise
+    if last:
+        raise last
+    raise RuntimeError("send_storage_message: exhausted retries")
 
 
 def send_storage_text(text: str) -> None:

@@ -719,6 +719,70 @@ def build_telegram_caption(article: Dict[str, Any]) -> str:
     return cap
 
 
+def _is_valid_card_jpeg(path: Optional[str], min_bytes: int = 2800) -> bool:
+    if not path or not os.path.isfile(path):
+        return False
+    try:
+        if os.path.getsize(path) < min_bytes:
+            return False
+    except OSError:
+        return False
+    if Image is None:
+        return True
+    try:
+        with Image.open(path) as im:
+            im.load()
+            w, h = im.size
+        return w >= 200 and h >= 200
+    except Exception:
+        return False
+
+
+def _render_minimal_fallback_card(article: Dict[str, Any], out_path: str) -> str:
+    """고급 템플릿 실패 시에도 JPEG는 반드시 나오게 하는 최소 카드."""
+    if Image is None:
+        raise RuntimeError("Pillow(PIL) 미설치")
+    title = news_module.clean_spaces(article.get("title", "") or "")[:220]
+    source = news_module.article_source_name(article) or "News"
+    base = _solid_background(W, H).convert("RGBA")
+    overlay = Image.new("RGBA", base.size, (0, 0, 0, 0))
+    od = ImageDraw.Draw(overlay)
+    y0 = int(H * 0.48)
+    for y in range(y0, H):
+        t = (y - y0) / max(H - y0 - 1, 1)
+        alpha = int(25 + 165 * (t**1.02))
+        od.line([(0, y), (W, y)], fill=(0, 0, 0, min(alpha, 210)))
+    base.alpha_composite(overlay)
+    draw = ImageDraw.Draw(base)
+    f = _load_font(42)
+    max_w = W - 2 * PAD_X
+    lines = _wrap_lines(draw, title, f, max_w)[:7]
+    y = H - 120 - len(lines) * int(42 * 1.2)
+    y = max(PAD_X, y)
+    for ln in lines:
+        _draw_text_outlined(
+            draw,
+            (PAD_X, int(y)),
+            ln,
+            f,
+            fill=(255, 255, 255, 255),
+            outline=(6, 8, 18, 220),
+        )
+        y += int(42 * 1.2)
+    fs = _load_font(22)
+    _draw_text_outlined(
+        draw,
+        (PAD_X, H - 52),
+        source,
+        fs,
+        fill=(210, 218, 232, 255),
+        outline=(4, 6, 14, 200),
+    )
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+    base.convert("RGB").save(out_path, "JPEG", quality=88, optimize=True)
+    return out_path
+
+
 def run_telegram_single_card(
     *,
     articles: Optional[List[Dict[str, Any]]] = None,
@@ -755,9 +819,19 @@ def run_telegram_single_card(
     safe_key = news_module.dedup_key(article)[:40].replace(" ", "_")
     safe_key = re.sub(r"[^a-zA-Z0-9가-힣_\-]", "", safe_key) or "card"
     out_path = os.path.join(out_dir, f"telegram_single_card_{safe_key}_{CARD_TEMPLATE}.jpg")
+    fb_path = os.path.join(out_dir, f"telegram_single_card_{safe_key}_fallback.jpg")
     try:
         path = render_single_card(article, out_path)
-        return path, article
+        if _is_valid_card_jpeg(path):
+            return path, article
+        print(f"[telegram_single_card] primary output invalid size/corrupt: {path!r}")
     except Exception as e:
         print(f"[telegram_single_card] render failed: {repr(e)}")
-        return None, None
+    try:
+        path2 = _render_minimal_fallback_card(article, fb_path)
+        if _is_valid_card_jpeg(path2):
+            print("[telegram_single_card] minimal fallback card ok")
+            return path2, article
+    except Exception as e2:
+        print(f"[telegram_single_card] fallback render failed: {repr(e2)}")
+    return None, None
