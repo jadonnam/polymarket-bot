@@ -9,7 +9,7 @@
 
 0) 워커 동작
 - `python main_instagram.py`는 `CHECK_INTERVAL`(초)마다 `main()`을 반복 실행합니다.
-- 정규 전송은 KST 08:10·19:10 전후(기본 각 30분 윈도우)에만 시도되며, 그 사이에는 고득점 뉴스가 있을 때만 오프슬롯 전송이 가능합니다(환경변수로 조절).
+- 정규 전송은 KST 08:10·19:10 시작 이후 `REGULAR_POST_MINUTE_WINDOW`(기본 120분) 안에만 시도되며, 그 밖에는 고득점 뉴스가 있을 때만 오프슬롯 전송이 가능합니다(`OFF_SCHEDULE_*`).
 - 루트 `nixpacks.toml`로 Railway(Nixpacks) 빌드 시 `fonts-noto-cjk`를 깔면 Linux에서 한글 카드 폰트가 안정적입니다.
 - 상세 변수 설명은 `.env.example` 참고.
 

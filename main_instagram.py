@@ -59,7 +59,7 @@ MARKET_FACT_OUT_DIR = "output_marketfact"
 STATIC_REEL_OUT_DIR = "output_static_reel"
 TELEGRAM_CARD_OUT_DIR = "output_telegram_card"
 
-REGULAR_POST_MINUTE_WINDOW = int((os.getenv("REGULAR_POST_MINUTE_WINDOW") or "30").strip())
+REGULAR_POST_MINUTE_WINDOW = int((os.getenv("REGULAR_POST_MINUTE_WINDOW") or "120").strip())
 REGULAR_MORNING_MINUTE = 8 * 60 + 10
 REGULAR_EVENING_MINUTE = 19 * 60 + 10
 BREAKING_COOLDOWN_MINUTES = 720
@@ -92,6 +92,14 @@ TELEGRAM_CARD_SEND_STATE_FILE = "telegram_card_send_state.json"
 # 스레드 중간 포스팅 시간 (KST 시간 기준)
 THREADS_MIDDAY_HOURS = [9, 13, 17, 21]
 
+_BRIEFING_ENGINE_MODES = (
+    "korea_close",
+    "us_preopen",
+    "macro_issue",
+    "company_focus",
+    "sector_focus",
+)
+
 
 def now_kst() -> datetime:
     return datetime.now(timezone.utc) + timedelta(hours=9)
@@ -109,26 +117,19 @@ def selected_pipeline_name() -> str:
 
 
 def resolve_content_mode() -> str:
-    # auto mode suggestion: 08:10 briefing, 19:10 market_fact
-    mode = CONTENT_MODE
-    if mode in ("market_fact", "briefing"):
-        return mode
-    if mode == "auto":
+    # auto: 08:10 briefing, 19:10 market_fact (논리 라벨)
+    raw = (CONTENT_MODE or "").strip().lower()
+    if raw in _BRIEFING_ENGINE_MODES:
+        return raw
+    if raw in ("market_fact", "briefing"):
+        return raw
+    if raw == "auto":
         slot = current_regular_slot()
         if slot == "morning":
             return "briefing"
         if slot == "evening":
             return "market_fact"
     return "briefing"
-
-
-_BRIEFING_ENGINE_MODES = (
-    "korea_close",
-    "us_preopen",
-    "macro_issue",
-    "company_focus",
-    "sector_focus",
-)
 
 
 def effective_briefing_summary_mode() -> str:
@@ -182,6 +183,24 @@ def current_regular_slot() -> Optional[str]:
 
 def should_run_regular_post() -> bool:
     return FORCE_REGULAR_NOW or current_regular_slot() is not None
+
+
+def _regular_slot_schedule_hint() -> str:
+    """스킵 로그용 — KST 기준 슬롯 구간(환경변수 REGULAR_POST_MINUTE_WINDOW 반영)."""
+
+    def mm(m: int) -> str:
+        return f"{m // 60:02d}:{m % 60:02d}"
+
+    w = REGULAR_POST_MINUTE_WINDOW
+    nk = now_kst()
+    ms, me = REGULAR_MORNING_MINUTE, REGULAR_MORNING_MINUTE + w
+    es, ee = REGULAR_EVENING_MINUTE, REGULAR_EVENING_MINUTE + w
+    return (
+        f"now_kst={nk.strftime('%m-%d %H:%M')} "
+        f"morning_kst={mm(ms)}-{mm(me)} "
+        f"evening_kst={mm(es)}-{mm(ee)} "
+        f"window={w}m"
+    )
 
 
 def load_regular_state() -> Dict[str, str]:
@@ -1062,7 +1081,8 @@ def main() -> None:
                     "정규 슬롯 아님 · 오프슬롯 이슈 트리거 없음 "
                     "(FORCE_CARD_TEST=false, OFF_SCHEDULE_ISSUE_ENABLED="
                     f"{str(OFF_SCHEDULE_ISSUE_ENABLED).lower()}, "
-                    f"min_score={OFF_SCHEDULE_MIN_SCORE})"
+                    f"min_score={OFF_SCHEDULE_MIN_SCORE}) "
+                    f"| {_regular_slot_schedule_hint()}"
                 )
             if should_send_text:
                 allow_send = False
