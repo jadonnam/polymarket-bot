@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
+import signal
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 import news as news_module
+from config import CHECK_INTERVAL
 from content_topics_v1 import pick_single_topic
 from card_news_v2 import build_card_news_v2
 from card_v3 import create_breaking_image
@@ -79,6 +83,11 @@ FORCE_CARD_TEST = (os.getenv("FORCE_CARD_TEST") or "false").lower() == "true"
 TEXT_BRIEFING_ONLY = (os.getenv("TEXT_BRIEFING_ONLY") or "true").lower() == "true"
 TELEGRAM_SINGLE_CARD = (os.getenv("TELEGRAM_SINGLE_CARD") or "true").lower() == "true"
 NEWS_API_KEY_SET = bool((os.getenv("NEWS_API_KEY") or "").strip())
+OFF_SCHEDULE_ISSUE_ENABLED = (os.getenv("OFF_SCHEDULE_ISSUE_ENABLED") or "true").lower() == "true"
+OFF_SCHEDULE_MIN_SCORE = int((os.getenv("OFF_SCHEDULE_MIN_SCORE") or "70").strip())
+OFF_SCHEDULE_COOLDOWN_MINUTES = int((os.getenv("OFF_SCHEDULE_COOLDOWN_MINUTES") or "90").strip())
+CARD_SEND_DEDUP_HOURS = int((os.getenv("CARD_SEND_DEDUP_HOURS") or "20").strip())
+TELEGRAM_CARD_SEND_STATE_FILE = "telegram_card_send_state.json"
 
 # 스레드 중간 포스팅 시간 (KST 시간 기준)
 THREADS_MIDDAY_HOURS = [9, 13, 17, 21]
@@ -111,6 +120,35 @@ def resolve_content_mode() -> str:
         if slot == "evening":
             return "market_fact"
     return "briefing"
+
+
+_BRIEFING_ENGINE_MODES = (
+    "korea_close",
+    "us_preopen",
+    "macro_issue",
+    "company_focus",
+    "sector_focus",
+)
+
+
+def effective_briefing_summary_mode() -> str:
+    """
+    daily_summary_card / 텍스트 브리핑이 이해하는 모드 키로 정규화.
+    - CONTENT_MODE가 이미 엔진 키면 그대로
+    - briefing / auto(아침) → us_preopen
+    - evening + briefing 계열 → korea_close
+    - market_fact / auto(저녁) → sector_focus
+    """
+    raw = (CONTENT_MODE or "").strip().lower()
+    if raw in _BRIEFING_ENGINE_MODES:
+        return raw
+    resolved = resolve_content_mode()
+    if resolved == "market_fact":
+        return "sector_focus"
+    slot = current_regular_slot()
+    if slot == "evening":
+        return "korea_close"
+    return "us_preopen"
 
 
 def generated_at_text() -> str:
@@ -178,6 +216,80 @@ def mark_regular_sent() -> None:
     elif slot == "evening":
         state["last_evening_date"] = today
     save_regular_state(state)
+
+
+def _telegram_card_dedup_key(article: Dict[str, Any]) -> str:
+    u = str(article.get("url") or "").strip()
+    if u.lower().startswith("https://"):
+        return u
+    t = news_module.clean_spaces(article.get("title", "") or "").encode("utf-8", errors="ignore")
+    return "title:" + hashlib.md5(t).hexdigest()
+
+
+def load_telegram_card_send_state() -> Dict[str, Any]:
+    return _load_json(TELEGRAM_CARD_SEND_STATE_FILE, {"url_sends": [], "off_schedule_sends": []})
+
+
+def save_telegram_card_send_state(data: Dict[str, Any]) -> None:
+    data["url_sends"] = (data.get("url_sends") or [])[-120:]
+    data["off_schedule_sends"] = (data.get("off_schedule_sends") or [])[-60:]
+    _save_json(TELEGRAM_CARD_SEND_STATE_FILE, data)
+
+
+def _parse_kst_ts(value: str) -> Optional[datetime]:
+    try:
+        dt = datetime.fromisoformat(value)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone(timedelta(hours=9)))
+        return dt
+    except Exception:
+        return None
+
+
+def record_telegram_card_sent(article: Optional[Dict[str, Any]], off_schedule: bool) -> None:
+    if not article:
+        return
+    key = _telegram_card_dedup_key(article)
+    now = now_kst()
+    st = load_telegram_card_send_state()
+    st.setdefault("url_sends", []).append({"key": key, "ts": now.isoformat(timespec="seconds")})
+    if off_schedule:
+        st.setdefault("off_schedule_sends", []).append({"ts": now.isoformat(timespec="seconds")})
+    save_telegram_card_send_state(st)
+
+
+def should_allow_off_schedule_issue(score: int, article: Dict[str, Any]) -> bool:
+    if score < OFF_SCHEDULE_MIN_SCORE:
+        return False
+    key = _telegram_card_dedup_key(article)
+    now = now_kst()
+    cutoff_dup = now - timedelta(hours=CARD_SEND_DEDUP_HOURS)
+    cutoff_cd = now - timedelta(minutes=OFF_SCHEDULE_COOLDOWN_MINUTES)
+    st = load_telegram_card_send_state()
+    for row in st.get("url_sends", []) or []:
+        ts = _parse_kst_ts(str(row.get("ts") or ""))
+        if ts is None or ts < cutoff_dup:
+            continue
+        if row.get("key") == key:
+            print(
+                f"[off_schedule_issue] skip: 동일 기사 URL {CARD_SEND_DEDUP_HOURS}h 이내 재전송 방지"
+            )
+            return False
+    for row in st.get("off_schedule_sends", []) or []:
+        ts = _parse_kst_ts(str(row.get("ts") or ""))
+        if ts is None:
+            continue
+        if ts >= cutoff_cd:
+            print(
+                f"[off_schedule_issue] skip: 오프슬롯 전송 쿨다운 "
+                f"{OFF_SCHEDULE_COOLDOWN_MINUTES}분 이내"
+            )
+            return False
+    short_key = key[:72] + ("…" if len(key) > 72 else "")
+    print(
+        f"[off_schedule_issue] 트리거: score={score} (min={OFF_SCHEDULE_MIN_SCORE}) {short_key}"
+    )
+    return True
 
 
 # ── 스레드 중간 포스팅 중복 방지 ────────────────────────────
@@ -586,17 +698,12 @@ def _briefing_fetch_build_write_send(
     rank_items = build_news_rank_items()
     rank_labels = [str(x.get("label", "")).strip() for x in rank_items[:4] if x.get("label")]
 
-    _card_modes = ("korea_close", "us_preopen", "macro_issue", "company_focus", "sector_focus")
-    # 요청 규칙: CONTENT_MODE가 카드모드면 그대로, 아니면 슬롯 기반/기본값(korea_close)
-    summary_mode = CONTENT_MODE if CONTENT_MODE in _card_modes else "korea_close"
-    if summary_mode == "korea_close" and CONTENT_MODE not in _card_modes:
-        slot = current_regular_slot()
-        if slot == "morning":
-            summary_mode = "us_preopen"
-        else:
-            summary_mode = "korea_close"
-
-    print(f"[market_briefing] content_mode={summary_mode}")
+    summary_mode = effective_briefing_summary_mode()
+    cm = (CONTENT_MODE or "").strip().lower()
+    tail = ""
+    if cm not in _BRIEFING_ENGINE_MODES:
+        tail = f", resolved={resolve_content_mode()!r}"
+    print(f"[market_briefing] content_mode={summary_mode} (CONTENT_MODE={CONTENT_MODE!r}{tail})")
     payload = build_daily_summary_payload_auto(
         articles=raw_articles,
         rank_labels=rank_labels,
@@ -905,6 +1012,10 @@ def main() -> None:
         f"[env] TELEGRAM_CARD_USE_NEWS_IMAGE="
         f"{str((os.getenv('TELEGRAM_CARD_USE_NEWS_IMAGE') or 'false').lower() == 'true').lower()}"
     )
+    _ct = (os.getenv("CARD_TEMPLATE") or "photo").strip().lower()
+    if _ct not in ("photo", "badge", "quote"):
+        _ct = "photo"
+    print(f"[env] CARD_TEMPLATE={_ct}")
     print(f"[env] NEWS_API_KEY={'set' if NEWS_API_KEY_SET else 'missing'}")
     print(f"[env] FORCE_CARD_TEST={str(FORCE_CARD_TEST).lower()}")
     print(f"[env] CONTENT_MODE={CONTENT_MODE}")
@@ -928,15 +1039,41 @@ def main() -> None:
     if TEXT_BRIEFING_ONLY:
         print("[briefing_only] enabled")
         try:
-            should_send_text = FORCE_CARD_TEST or should_run_regular_post()
+            slot_active = should_run_regular_post()
+            cached_arts: Optional[List[Dict[str, Any]]] = None
+            issue_off_schedule = False
+            if (
+                TELEGRAM_SINGLE_CARD
+                and OFF_SCHEDULE_ISSUE_ENABLED
+                and not FORCE_CARD_TEST
+                and not slot_active
+            ):
+                from telegram_single_card import best_single_card_candidate
+
+                cached_arts = fetch_news_articles(hours_back=36, limit=40)
+                iss_score, iss_cand = best_single_card_candidate(cached_arts)
+                if iss_cand is not None and should_allow_off_schedule_issue(iss_score, iss_cand):
+                    issue_off_schedule = True
+
+            should_send_text = FORCE_CARD_TEST or slot_active or issue_off_schedule
             if not should_send_text:
                 print(
                     "[briefing_only] skip send: "
-                    "정규 슬롯 아님(FORCE_REGULAR_NOW=false, FORCE_CARD_TEST=false)"
+                    "정규 슬롯 아님 · 오프슬롯 이슈 트리거 없음 "
+                    "(FORCE_CARD_TEST=false, OFF_SCHEDULE_ISSUE_ENABLED="
+                    f"{str(OFF_SCHEDULE_ISSUE_ENABLED).lower()}, "
+                    f"min_score={OFF_SCHEDULE_MIN_SCORE})"
                 )
             if should_send_text:
-                # 중복 전송 방지(단, FORCE_CARD_TEST는 항상 실행)
-                if FORCE_CARD_TEST or not already_sent_regular():
+                allow_send = False
+                if FORCE_CARD_TEST:
+                    allow_send = True
+                elif slot_active:
+                    allow_send = not already_sent_regular()
+                elif issue_off_schedule:
+                    allow_send = True
+
+                if allow_send:
                     if TELEGRAM_SINGLE_CARD:
                         from telegram_single_card import (
                             build_telegram_caption,
@@ -944,7 +1081,11 @@ def main() -> None:
                         )
 
                         print("[market_briefing] content_mode=single_trusted_news")
-                        arts = fetch_news_articles(hours_back=36, limit=40)
+                        arts = (
+                            cached_arts
+                            if cached_arts is not None
+                            else fetch_news_articles(hours_back=36, limit=40)
+                        )
                         card_path, picked = run_telegram_single_card(
                             articles=arts,
                             out_dir=TELEGRAM_CARD_OUT_DIR,
@@ -963,7 +1104,12 @@ def main() -> None:
                                 print("[telegram_storage_send] photo ok")
                                 print("[briefing_only] send single card only")
                                 if not FORCE_CARD_TEST:
-                                    mark_regular_sent()
+                                    if slot_active:
+                                        mark_regular_sent()
+                                    if picked:
+                                        record_telegram_card_sent(
+                                            picked, off_schedule=issue_off_schedule
+                                        )
                             except Exception as e:
                                 print(f"[telegram_single_card] send_storage_image failed: {repr(e)}")
                                 *_ignore, sent_ok = _briefing_fetch_build_write_send(
@@ -973,7 +1119,12 @@ def main() -> None:
                                     print("[telegram_storage_send] text ok")
                                     print("[briefing_only] send text only")
                                     if not FORCE_CARD_TEST:
-                                        mark_regular_sent()
+                                        if slot_active:
+                                            mark_regular_sent()
+                                        if picked:
+                                            record_telegram_card_sent(
+                                                picked, off_schedule=issue_off_schedule
+                                            )
                         else:
                             if not card_path or not picked:
                                 print(
@@ -994,7 +1145,12 @@ def main() -> None:
                                 print("[telegram_storage_send] text ok")
                                 print("[briefing_only] send text only")
                                 if not FORCE_CARD_TEST:
-                                    mark_regular_sent()
+                                    if slot_active:
+                                        mark_regular_sent()
+                                    if picked:
+                                        record_telegram_card_sent(
+                                            picked, off_schedule=issue_off_schedule
+                                        )
                     else:
                         *_ignore, sent_ok = _briefing_fetch_build_write_send(
                             delivery="text_market_briefing"
@@ -1003,7 +1159,8 @@ def main() -> None:
                             print("[telegram_storage_send] text ok")
                             print("[briefing_only] send text only")
                             if not FORCE_CARD_TEST:
-                                mark_regular_sent()
+                                if slot_active:
+                                    mark_regular_sent()
                 else:
                     print(
                         "[briefing_only] skip send: "
@@ -1065,6 +1222,31 @@ def main() -> None:
         print("[스레드 중간 포스팅 오류]", repr(e))
 
 
+def _sleep_until_next_cycle(seconds: int, stop_state: dict) -> None:
+    remaining = max(1, seconds)
+    while remaining > 0 and not stop_state["stop"]:
+        step = min(30, remaining)
+        time.sleep(step)
+        remaining -= step
+
+
 if __name__ == "__main__":
+    stop_state: dict = {"stop": False}
+
+    def _handle_stop(*_args):
+        stop_state["stop"] = True
+        print("[worker] stop signal received")
+
+    signal.signal(signal.SIGTERM, _handle_stop)
+    signal.signal(signal.SIGINT, _handle_stop)
+
     print("main_instagram loaded")
-    main()
+    print(f"[worker] loop CHECK_INTERVAL={CHECK_INTERVAL}s")
+    while not stop_state["stop"]:
+        try:
+            main()
+        except Exception as e:
+            print("[worker] main() error:", repr(e))
+        if stop_state["stop"]:
+            break
+        _sleep_until_next_cycle(CHECK_INTERVAL, stop_state)

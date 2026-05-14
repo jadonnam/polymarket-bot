@@ -28,6 +28,8 @@ PAD_X = 56
 BOTTOM_ZONE = 620
 # NewsAPI urlToImage는 기사와 안 맞는 경우가 많아 기본은 끔(그라데이션 배경)
 TELEGRAM_CARD_USE_NEWS_IMAGE = (os.getenv("TELEGRAM_CARD_USE_NEWS_IMAGE") or "false").lower() == "true"
+_CARD_TMPL = (os.getenv("CARD_TEMPLATE") or "photo").strip().lower()
+CARD_TEMPLATE = _CARD_TMPL if _CARD_TMPL in ("photo", "badge", "quote") else "photo"
 
 
 def _font_candidates() -> List[str]:
@@ -39,8 +41,10 @@ def _font_candidates() -> List[str]:
         [
             r"C:\Windows\Fonts\malgunbd.ttf",
             r"C:\Windows\Fonts\malgun.ttf",
-            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.otf",
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.otf",
             "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
             "/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf",
             "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
             "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
@@ -182,16 +186,57 @@ def _wrap_lines(draw: Any, text: str, font: Any, max_width: int) -> List[str]:
     return lines[:9]
 
 
-def pick_article_for_single_card(articles: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+def _relaxed_body_passes(article: Dict[str, Any]) -> bool:
+    """Strict `is_low_quality_text`는 본문 40자 미만을 배제 — 짧은 통신 요약도 카드로 쓸 수 있게 완화."""
+    title = news_module.clean_spaces(article.get("title", "") or "")
+    desc = news_module.clean_spaces(article.get("description", "") or article.get("content", "") or "")
+    text = f"{title} {desc}".lower()
+    if len(title) < 18:
+        return False
+    if len(desc) < 28 and len(title) < 72:
+        return False
+    for p in news_module.LOW_QUALITY_PATTERNS:
+        if p in text:
+            return False
+    return True
+
+
+def best_single_card_candidate_relaxed(
+    articles: List[Dict[str, Any]],
+) -> Tuple[int, Optional[Dict[str, Any]]]:
+    best_s = -1
+    best_a: Optional[Dict[str, Any]] = None
+    for a in articles or []:
+        if not news_module.trusted_article(a):
+            continue
+        if not news_module.has_market_impact(a):
+            continue
+        if not _relaxed_body_passes(a):
+            continue
+        url = str(a.get("url") or "").strip()
+        if not url.lower().startswith("https://"):
+            continue
+        title = news_module.clean_spaces(a.get("title", ""))
+        if len(title) < 18:
+            continue
+        s = news_module.score_article(a)
+        if s > best_s:
+            best_s = s
+            best_a = a
+    if best_a is None:
+        return -1, None
+    return best_s, best_a
+
+
+def best_single_card_candidate(
+    articles: List[Dict[str, Any]],
+) -> Tuple[int, Optional[Dict[str, Any]]]:
     """
-    팩트 게이트(확실한 기준):
-    - news.trusted_article (도메인/통신사 화이트리스트)
-    - 시장 연관(has_market_impact / has_high_impact는 fetch 단계에서 이미 적용됐을 수 있음 — 재확인)
-    - 저품질/라이브블로그 등 제외
-    - 원문 URL 필수(https)
-    - 점수: news.score_article 기준 상위 1건
+    pick_article_for_single_card와 동일한 팩트 게이트·점수 기준으로
+    (최고 점수, 해당 기사)를 반환. 후보가 없으면 (-1, None).
     """
-    scored: List[Tuple[int, Dict[str, Any]]] = []
+    best_s = -1
+    best_a: Optional[Dict[str, Any]] = None
     for a in articles or []:
         if not news_module.trusted_article(a):
             continue
@@ -205,14 +250,69 @@ def pick_article_for_single_card(articles: List[Dict[str, Any]]) -> Optional[Dic
         title = news_module.clean_spaces(a.get("title", ""))
         if len(title) < 18:
             continue
-        scored.append((news_module.score_article(a), a))
-    scored.sort(key=lambda x: x[0], reverse=True)
-    if not scored:
-        return None
-    return scored[0][1]
+        s = news_module.score_article(a)
+        if s > best_s:
+            best_s = s
+            best_a = a
+    if best_a is None:
+        return -1, None
+    return best_s, best_a
 
 
-def render_single_card(article: Dict[str, Any], out_path: str) -> str:
+def pick_article_for_single_card(articles: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """
+    팩트 게이트(확실한 기준):
+    - news.trusted_article (도메인/통신사 화이트리스트)
+    - 시장 연관(has_market_impact / has_high_impact는 fetch 단계에서 이미 적용됐을 수 있음 — 재확인)
+    - 저품질/라이브블로그 등 제외
+    - 원문 URL 필수(https)
+    - 점수: news.score_article 기준 상위 1건
+    """
+    _s, a = best_single_card_candidate(articles)
+    return a
+
+
+def _headline_split_photo(title: str, subtitle: str) -> Tuple[str, str]:
+    """BoA/삼성형: 첫 줄 강조 + 둘째 줄 설명."""
+    title = (title or "").strip()
+    subtitle = (subtitle or "").strip()
+    if "," in title and len(title.split(",", 1)[0]) < 96:
+        a, b = title.split(",", 1)
+        line1 = a.strip() + ","
+        line2 = (b.strip() + (" " + subtitle if subtitle else "")).strip()
+        return line1, line2[:320]
+    if len(title) <= 58:
+        return title, subtitle
+    cut = title[:58].rfind(" ")
+    if cut < 12:
+        cut = 58
+    return title[:cut].strip(), (title[cut:].strip() + (" " + subtitle if subtitle else ""))[:320]
+
+
+def _ticker_from_title(title: str) -> str:
+    m = re.findall(r"\b[A-Z]{2,6}\b", title or "")
+    if m:
+        return m[0]
+    w = re.sub(r"[^A-Za-z0-9\s]", "", title or "").split()
+    if w:
+        return (w[0].upper()[:6] or "NEWS")
+    return "NEWS"
+
+
+def _tech_datacenter_background(tw: int, th: int) -> Image.Image:
+    """IREN 레퍼런스용 쿨톤 그라데이션(사진 대체)."""
+    base = Image.new("RGB", (tw, th))
+    g = ImageDraw.Draw(base)
+    for y in range(th):
+        t = y / max(th - 1, 1)
+        r = int(10 + t * 28)
+        gg = int(14 + t * 42)
+        b = int(40 + t * 90)
+        g.line([(0, y), (tw, y)], fill=(r, gg, b))
+    return base
+
+
+def _render_template_photo(article: Dict[str, Any], out_path: str) -> str:
     if Image is None:
         raise RuntimeError("Pillow(PIL) 미설치")
 
@@ -248,46 +348,53 @@ def render_single_card(article: Dict[str, Any], out_path: str) -> str:
     _apply_bottom_gradient(base)
     draw = ImageDraw.Draw(base)
 
+    top_left = (os.getenv("CARD_TOP_LEFT_LABEL") or "").strip()
+    y_brand = 42
+    if top_left:
+        f_tl = _load_font(22)
+        _draw_text_outlined(draw, (PAD_X, 36), top_left, f_tl, fill=(248, 248, 252, 255))
+        y_brand = 78
+
     brand = (os.getenv("CARD_BRAND_LABEL") or "MARKET CARD").strip()
-    f_brand = _load_font(28)
-    _draw_text_outlined(draw, (PAD_X, 44), brand, f_brand)
+    if brand:
+        f_brand = _load_font(26)
+        _draw_text_outlined(draw, (PAD_X, y_brand), brand, f_brand)
 
     max_text_w = W - 2 * PAD_X
-    body = title if not subtitle else f"{title}\n{subtitle}"
+    line1, line2 = _headline_split_photo(title, subtitle)
+    f_h1 = _load_font(56)
+    f_h2 = _load_font(40)
+    h1_lines = _wrap_lines(draw, line1, f_h1, max_text_w)[:2]
+    if not h1_lines and line1:
+        h1_lines = [line1[:100]]
+    h2_lines = _wrap_lines(draw, line2, f_h2, max_text_w)[:4] if line2 else []
 
-    font_size = 58
-    lines: List[str] = []
-    while font_size >= 32:
-        font = _load_font(font_size)
-        lines = _wrap_lines(draw, body, font, max_text_w)
-        est_h = len(lines) * int(font_size * 1.28)
-        if est_h < BOTTOM_ZONE - 140:
-            break
-        font_size -= 2
-
-    font = _load_font(font_size)
-    lines = _wrap_lines(draw, body, font, max_text_w)
-
-    if _has_cjk(body) and not os.getenv("CARD_FONT_PATH"):
-        # 기본 폰트는 한글 글리프가 없을 수 있음
+    body_chk = line1 + line2
+    if _has_cjk(body_chk) and not os.getenv("CARD_FONT_PATH"):
         print(
             "[telegram_single_card] CJK 문자 포함 — Railway/Linux에서는 CARD_FONT_PATH(NotoSansKR 등) 설정 권장"
         )
 
-    line_h = int(font_size * 1.26)
-    y0 = H - BOTTOM_ZONE + 56
-    y_end = y0 + len(lines) * line_h + 8
-    panel_bottom = min(H - 44, y_end + 20)
+    y0 = H - BOTTOM_ZONE + 52
+    y_cursor = y0
+    for ln in h1_lines:
+        y_cursor += int(56 * 1.22)
+    for ln in h2_lines:
+        y_cursor += int(40 * 1.22)
+    panel_bottom = min(H - 44, y_cursor + 22)
     panel_rect = [PAD_X - 20, y0 - 20, W - PAD_X + 20, panel_bottom]
     try:
         draw.rounded_rectangle(panel_rect, radius=18, fill=(0, 0, 0, 155))
     except Exception:
         draw.rectangle(panel_rect, fill=(0, 0, 0, 155))
 
-    y = y0
-    for line in lines:
-        _draw_text_outlined(draw, (PAD_X, y), line, font)
-        y += line_h
+    y_cursor = y0
+    for ln in h1_lines:
+        _draw_text_outlined(draw, (PAD_X, y_cursor), ln, f_h1)
+        y_cursor += int(56 * 1.22)
+    for ln in h2_lines:
+        _draw_text_outlined(draw, (PAD_X, y_cursor), ln, f_h2)
+        y_cursor += int(40 * 1.22)
 
     src_line = f"출처: {source}" if source else "출처: 확인됨(통신사/도메인 화이트리스트)"
     f_src = _load_font(24)
@@ -297,6 +404,136 @@ def render_single_card(article: Dict[str, Any], out_path: str) -> str:
     base.convert("RGB").save(out_path, "JPEG", quality=92, optimize=True)
     print(f"[telegram_single_card] wrote {out_path}")
     return out_path
+
+
+def _render_template_badge(article: Dict[str, Any], out_path: str) -> str:
+    """IREN형: 쿨톤 배경 + 중앙 그린 배지(티커) + 하단 제목 스택."""
+    if Image is None:
+        raise RuntimeError("Pillow(PIL) 미설치")
+    title = _clamp_title(article.get("title", "") or "")
+    subtitle = _subtitle_from_article(article)
+    source = news_module.article_source_name(article)
+
+    base = _tech_datacenter_background(W, H).convert("RGBA")
+    _apply_bottom_gradient(base)
+    draw = ImageDraw.Draw(base)
+
+    cx, cy = W // 2, int(H * 0.34)
+    skew = 20
+    poly = [
+        (cx - 175 + skew, cy - 52),
+        (cx + 155 + skew, cy - 66),
+        (cx + 175 - skew, cy + 58),
+        (cx - 155 - skew, cy + 64),
+    ]
+    draw.polygon(poly, fill=(46, 220, 113, 255))
+
+    tick = _ticker_from_title(title)
+    f_tick = _load_font(54)
+    tw = draw.textlength(tick, font=f_tick)
+    tx = int(cx - tw / 2 + 6)
+    ty = int(cy - 32)
+    draw.text((tx, ty), tick, font=f_tick, fill=(10, 14, 18))
+
+    max_text_w = W - 2 * PAD_X
+    stack = title
+    if subtitle:
+        stack = title + "\n" + subtitle
+    f_body = _load_font(40)
+    lines = _wrap_lines(draw, stack, f_body, max_text_w)[:5]
+    y0 = H - 340
+    for i, ln in enumerate(lines):
+        _draw_text_outlined(draw, (PAD_X, y0 + i * int(40 * 1.22)), ln, f_body)
+
+    f_src = _load_font(22)
+    _draw_text_outlined(
+        draw,
+        (PAD_X, H - 52),
+        f"출처: {source}" if source else "출처: 확인",
+        f_src,
+        fill=(210, 218, 228, 255),
+    )
+
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+    base.convert("RGB").save(out_path, "JPEG", quality=92, optimize=True)
+    print(f"[telegram_single_card] wrote {out_path} (badge)")
+    return out_path
+
+
+def _render_template_quote(article: Dict[str, Any], out_path: str) -> str:
+    """HipHub형: 웜톤 배경 + 인용 박스 + 하단 대제목."""
+    if Image is None:
+        raise RuntimeError("Pillow(PIL) 미설치")
+    title = _clamp_title(article.get("title", "") or "")
+    subtitle = _subtitle_from_article(article)
+    source = news_module.article_source_name(article)
+
+    base = Image.new("RGB", (W, H))
+    g = ImageDraw.Draw(base)
+    for y in range(H):
+        t = y / max(H - 1, 1)
+        r = int(38 + t * 95)
+        gg = int(16 + t * 38)
+        b = int(20 + t * 32)
+        g.line([(0, y), (W, y)], fill=(r, gg, b))
+    base = base.convert("RGBA")
+    _apply_bottom_gradient(base)
+    draw = ImageDraw.Draw(base)
+
+    brand = (os.getenv("CARD_BRAND_LABEL") or "ISSUE").strip()
+    f_sm = _load_font(28)
+    twb = draw.textlength(brand, font=f_sm)
+    _draw_text_outlined(draw, (int((W - twb) / 2), 42), brand, f_sm)
+
+    quote_txt = (subtitle or title)[:260]
+    f_q = _load_font(26)
+    q_lines = _wrap_lines(draw, quote_txt, f_q, W - 2 * PAD_X - 48)[:3]
+    bx0, by0 = PAD_X - 6, int(H * 0.28)
+    box_h = 28 + len(q_lines) * 32 + 24
+    bx1, by1 = W - PAD_X + 6, by0 + box_h
+    draw.rectangle([bx0, by0, bx1, by1], fill=(255, 255, 255, 248))
+    try:
+        draw.rectangle([bx0, by0, bx1, by1], outline=(0, 0, 0, 255), width=3)
+    except TypeError:
+        draw.rectangle([bx0, by0, bx1, by1], outline=(0, 0, 0, 255))
+
+    yq = by0 + 18
+    for ql in q_lines:
+        draw.text((bx0 + 22, yq), ql, font=f_q, fill=(14, 14, 18))
+        yq += 32
+
+    f_big = _load_font(48)
+    max_text_w = W - 2 * PAD_X
+    hlines = _wrap_lines(draw, title, f_big, max_text_w)[:3]
+    yb = H - 300
+    for hl in hlines:
+        _draw_text_outlined(draw, (PAD_X, yb), hl, f_big)
+        yb += int(48 * 1.18)
+
+    f_src = _load_font(22)
+    _draw_text_outlined(
+        draw,
+        (PAD_X, H - 52),
+        f"출처: {source}" if source else "출처: 확인",
+        f_src,
+        fill=(220, 226, 234, 255),
+    )
+
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+    base.convert("RGB").save(out_path, "JPEG", quality=92, optimize=True)
+    print(f"[telegram_single_card] wrote {out_path} (quote)")
+    return out_path
+
+
+def render_single_card(article: Dict[str, Any], out_path: str) -> str:
+    if Image is None:
+        raise RuntimeError("Pillow(PIL) 미설치")
+    print(f"[telegram_single_card] CARD_TEMPLATE={CARD_TEMPLATE}")
+    if CARD_TEMPLATE == "badge":
+        return _render_template_badge(article, out_path)
+    if CARD_TEMPLATE == "quote":
+        return _render_template_quote(article, out_path)
+    return _render_template_photo(article, out_path)
 
 
 def build_telegram_caption(article: Dict[str, Any]) -> str:
@@ -311,10 +548,10 @@ def build_telegram_caption(article: Dict[str, Any]) -> str:
     if desc:
         parts.append(desc[:360])
     parts.append("")
-    parts.append("[팩트 게이트]")
-    parts.append("선별: 신뢰 통신사·도메인 + 시장 연관 + 저품질 제외")
+    parts.append("—")
+    parts.append("신뢰 매체·시장 연관 기사만 선별했습니다.")
     if src:
-        parts.append(f"매체: {src}")
+        parts.append(f"출처: {src}")
     if url:
         parts.append(f"원문: {url}")
     cap = "\n".join(parts).strip()
@@ -339,6 +576,14 @@ def run_telegram_single_card(
 
     article = pick_article_for_single_card(arts)
     if article is None:
+        _rs, relaxed = best_single_card_candidate_relaxed(arts)
+        if relaxed is not None:
+            article = relaxed
+            print(
+                "[telegram_single_card] strict gate empty — relaxed body rules pick "
+                f"score={_rs}"
+            )
+    if article is None:
         print("[telegram_single_card] 팩트 게이트 통과 기사 없음")
         return None, None
     print(
@@ -350,7 +595,7 @@ def run_telegram_single_card(
     os.makedirs(out_dir, exist_ok=True)
     safe_key = news_module.dedup_key(article)[:40].replace(" ", "_")
     safe_key = re.sub(r"[^a-zA-Z0-9가-힣_\-]", "", safe_key) or "card"
-    out_path = os.path.join(out_dir, f"telegram_single_card_{safe_key}.jpg")
+    out_path = os.path.join(out_dir, f"telegram_single_card_{safe_key}_{CARD_TEMPLATE}.jpg")
     try:
         path = render_single_card(article, out_path)
         return path, article

@@ -1,0 +1,5 @@
+# Railway Nixpacks: 한글 카드 렌더링용 Noto CJK 폰트 (telegram_single_card)
+# https://nixpacks.com/docs/configuration/file
+
+[phases.setup]
+aptPkgs = ["...", "fonts-noto-cjk", "fontconfig"]
