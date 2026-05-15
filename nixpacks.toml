@@ -2,4 +2,4 @@
 # https://nixpacks.com/docs/configuration/file
 
 [phases.setup]
-aptPkgs = ["...", "fonts-noto-cjk", "fontconfig"]
+aptPkgs = ["fonts-noto-cjk", "fontconfig"]

@@ -17,7 +17,8 @@ SEARCH_QUERY = (
     '("trump" OR "tariff" OR "trade deal" OR "bitcoin" OR "btc" OR "ethereum" OR "eth" '
     'OR "oil" OR "wti" OR "crude" OR "brent" OR "gold" OR "fed" OR "inflation" OR "cpi" '
     'OR "treasury yield" OR "rate cut" OR "nasdaq" OR "s&p 500" OR "dow" '
-    'OR "iran" OR "israel" OR "ceasefire" OR "war" OR "hormuz" OR "dollar" OR "fx" OR "won")'
+    'OR "iran" OR "israel" OR "ceasefire" OR "war" OR "hormuz" OR "dollar" OR "fx" '
+    'OR "KRW" OR "korean won" OR "won/dollar" OR "dollar/won")'
 )
 
 TRUSTED_DOMAINS = {
@@ -46,14 +47,45 @@ MARKET_KEYWORDS = [
     "trump", "tariff", "trade deal", "bitcoin", "btc", "ethereum", "eth",
     "oil", "wti", "crude", "brent", "gold", "fed", "inflation", "cpi",
     "yield", "rate cut", "nasdaq", "s&p", "dow", "ceasefire", "iran",
-    "israel", "war", "attack", "hormuz", "dollar", "fx", "won", "환율",
+    "israel", "war", "attack", "hormuz", "dollar", "fx", "krw", "환율",
     "유가", "금리", "물가", "비트", "달러", "금값",
 ]
 HIGH_IMPACT_KEYWORDS = [
     "oil", "wti", "crude", "brent", "hormuz", "fed", "inflation", "cpi",
-    "yield", "dollar", "fx", "won", "tariff", "bitcoin", "btc",
+    "yield", "dollar", "fx", "krw", "tariff", "bitcoin", "btc",
     "iran", "israel", "war", "attack", "ceasefire", "gold",
 ]
+
+# "won" 단독 문자열은 영어 동사 won(이겼다)과 충돌 — 원화는 아래 정규식만 인정
+_WON_CURRENCY_RE = re.compile(
+    r"\bkrw\b|korean won|south korean won|won/dollar|dollar/won|"
+    r"won strengthens|won weakens|won surges|won tumbles|won slips|won rises|won falls",
+    re.I,
+)
+
+_SPORTS_URL_MARKERS = (
+    "/sport/",
+    "/sports/",
+    "/football/",
+    "/soccer/",
+    "/nba/",
+    "/nfl/",
+    "/mlb/",
+    "/cricket/",
+    "/rugby/",
+    "/f1/",
+    "/tennis/",
+    "/golf/",
+    "/olympics/",
+    "/premier-league/",
+    "/champions-league/",
+)
+
+
+def is_sports_article(article: Dict[str, Any]) -> bool:
+    """BBC /sport/football 등 — 시장 카드·뉴스 후보에서 제외."""
+    u = str(article.get("url") or "").lower()
+    return any(m in u for m in _SPORTS_URL_MARKERS)
 BREAKING_KEYWORDS = [
     "breaking", "urgent", "developing", "attack", "missile", "strike",
     "ceasefire", "tariff", "fed", "rate", "oil", "bitcoin", "surge",
@@ -224,6 +256,8 @@ def _filter_articles_freshness(
 ) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     for a in articles or []:
+        if is_sports_article(a):
+            continue
         if not published_recent_enough(a, hours=hours_back):
             continue
         if article_url_slug_year_stale(a):
@@ -240,12 +274,16 @@ def dedup_key(article: Dict[str, Any]) -> str:
 
 def has_market_impact(article: Dict[str, Any]) -> bool:
     text = article_text(article)
-    return any(k in text for k in MARKET_KEYWORDS)
+    if any(k in text for k in MARKET_KEYWORDS):
+        return True
+    return bool(_WON_CURRENCY_RE.search(text))
 
 
 def has_high_impact(article: Dict[str, Any]) -> bool:
     text = article_text(article)
-    return any(k in text for k in HIGH_IMPACT_KEYWORDS)
+    if any(k in text for k in HIGH_IMPACT_KEYWORDS):
+        return True
+    return bool(_WON_CURRENCY_RE.search(text))
 
 
 def is_low_quality_text(article: Dict[str, Any]) -> bool:
@@ -359,6 +397,7 @@ def fetch_news(limit: int = 40, hours_back: int = 36) -> List[Dict[str, Any]]:
             a
             for a in cached
             if not is_press_release_wire(a)
+            and not is_sports_article(a)
             and published_recent_enough(a, hours=hours_back)
             and not article_url_slug_year_stale(a)
         ]
@@ -389,6 +428,8 @@ def fetch_news(limit: int = 40, hours_back: int = 36) -> List[Dict[str, Any]]:
     seen = set()
     for article in data.get("articles", []) or []:
         if not trusted_article(article):
+            continue
+        if is_sports_article(article):
             continue
         if not has_market_impact(article):
             continue

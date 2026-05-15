@@ -393,6 +393,8 @@ def best_single_card_candidate_relaxed(
     for a in articles or []:
         if not news_module.trusted_article(a):
             continue
+        if news_module.is_sports_article(a):
+            continue
         if not news_module.has_market_impact(a):
             continue
         if news_module.is_press_release_wire(a):
@@ -430,6 +432,8 @@ def best_single_card_candidate(
     max_h = _single_card_max_age_hours()
     for a in articles or []:
         if not news_module.trusted_article(a):
+            continue
+        if news_module.is_sports_article(a):
             continue
         if not news_module.has_market_impact(a):
             continue
