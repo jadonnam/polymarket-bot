@@ -25,8 +25,14 @@ except ImportError:  # pragma: no cover
     ImageFont = None  # type: ignore
 
 W, H = 1080, 1350
-PAD_X = 56
+PAD_X = 48
 BOTTOM_ZONE = 620
+# BoA/삼성형 레퍼런스 (1080×1350) — assets/card_references/ref_photo_bank.png 기준
+BOA_H1_PX = 62
+BOA_H2_PX = 36
+BOA_BOTTOM_MARGIN = 72
+BOA_GRADIENT_START = 0.42
+CARD_PHOTO_SHOW_SOURCE = (os.getenv("CARD_PHOTO_SHOW_SOURCE") or "false").lower() == "true"
 # NewsAPI urlToImage — 차트·무관 썸네일이 많아 기본 off. photo(BoA형)는 env와 무관하게 항상 폴백만.
 TELEGRAM_CARD_USE_NEWS_IMAGE = (os.getenv("TELEGRAM_CARD_USE_NEWS_IMAGE") or "false").lower() == "true"
 _CARD_TMPL = (os.getenv("CARD_TEMPLATE") or "photo").strip().lower()
@@ -67,8 +73,8 @@ def _try_openai_korean_card_lines(article: Dict[str, Any]) -> Optional[Tuple[str
         "Style: concise neutral market news like Korean wire services. "
         "No emoji, no clickbait, no exclamation. "
         'Output JSON only: {"line1":"...","line2":"..."}. '
-        "line1 = main headline (한글 우선, max ~42 chars). "
-        "line2 = supporting line (한글, max ~90 chars). "
+        "line1 = main headline (한글, max ~28 chars). End with comma when natural (예: 뱅크오브아메리카,). "
+        "line2 = supporting line (한글, max ~55 chars). No period on line1 if comma used. "
         "Keep tickers and proper nouns in Latin when natural (NVDA, Fed, CPI). "
         "If the input title is already Korean, polish lightly without changing facts."
     )
@@ -207,6 +213,33 @@ def _load_font(size: int) -> Any:
     return ImageFont.load_default()
 
 
+def _load_font_bold(size: int) -> Any:
+    for path in _font_candidates():
+        if not path or not os.path.isfile(path):
+            continue
+        low = path.lower()
+        if "bold" in low or "bd.ttf" in low or "bold.ttc" in low:
+            try:
+                return ImageFont.truetype(path, size=size)
+            except Exception:
+                continue
+    return _load_font(size)
+
+
+def _load_font_regular(size: int) -> Any:
+    for path in _font_candidates():
+        if not path or not os.path.isfile(path):
+            continue
+        low = path.lower()
+        if "bold" in low or "bd.ttf" in low:
+            continue
+        try:
+            return ImageFont.truetype(path, size=size)
+        except Exception:
+            continue
+    return _load_font(size)
+
+
 def _has_cjk(s: str) -> bool:
     return bool(re.search(r"[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]", s))
 
@@ -256,6 +289,23 @@ def _fallbacks_dir() -> str:
     return os.path.normpath(os.path.join(os.path.dirname(__file__), "assets", "fallbacks"))
 
 
+def _ref_photo_bank_path() -> Optional[str]:
+    p = os.path.normpath(
+        os.path.join(os.path.dirname(__file__), "assets", "card_references", "ref_photo_bank.png")
+    )
+    return p if os.path.isfile(p) else None
+
+
+def _watermark_path() -> Optional[str]:
+    env = (os.getenv("CARD_WATERMARK_PATH") or "").strip()
+    if env and os.path.isfile(env):
+        return env
+    p = os.path.normpath(
+        os.path.join(os.path.dirname(__file__), "assets", "branding", "watermark.png")
+    )
+    return p if os.path.isfile(p) else None
+
+
 def _pick_fallback_background_path(article: Dict[str, Any]) -> Optional[str]:
     """BoA/삼성형 레퍼런스용 스톡 배경 — 키워드별 assets/fallbacks/*.jpg"""
     root = _fallbacks_dir()
@@ -264,6 +314,23 @@ def _pick_fallback_background_path(article: Dict[str, Any]) -> Optional[str]:
         article.get("description", "") or article.get("content", "") or ""
     ).lower()
     blob = f"{title} {desc}"
+
+    bank_keys = (
+        "bank of america",
+        "bofa",
+        "bank",
+        "financial",
+        "materials stock",
+        "소재",
+        "반도체",
+        "semiconductor",
+        "nvidia",
+        "금융",
+    )
+    if any(k in blob for k in bank_keys):
+        ref = _ref_photo_bank_path()
+        if ref:
+            return ref
 
     rules: List[Tuple[Tuple[str, ...], str]] = [
         (
@@ -336,15 +403,62 @@ def _open_fallback_cover(path: str, tw: int, th: int) -> Optional[Image.Image]:
 
 
 def _apply_photo_bottom_gradient(img: Image.Image) -> None:
-    """전면 사진 위 하단만 눌러 제목 대비(레퍼런스 BoA/삼성형)."""
+    """BoA 레퍼런스: 하단 42%부터 부드러운 검정 그라데이션(외곽선 텍스트 대신)."""
     overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
     d = ImageDraw.Draw(overlay)
-    y0 = int(img.height * 0.46)
+    y0 = int(img.height * BOA_GRADIENT_START)
+    span = max(img.height - y0 - 1, 1)
     for y in range(y0, img.height):
-        t = (y - y0) / max(img.height - y0 - 1, 1)
-        alpha = int(25 + 215 * (t**0.92))
-        d.line([(0, y), (img.width, y)], fill=(0, 0, 0, min(alpha, 238)))
+        t = (y - y0) / span
+        # 하단으로 갈수록 진하게; 상단은 거의 투명
+        alpha = int(8 + 245 * (t**1.35))
+        d.line([(0, y), (img.width, y)], fill=(0, 0, 0, min(alpha, 252)))
     img.alpha_composite(overlay)
+
+
+def _draw_text_photo(
+    draw: Any,
+    xy: Tuple[int, int],
+    text: str,
+    font: Any,
+    fill: Tuple[int, int, int, int] = (255, 255, 255, 255),
+) -> None:
+    """레퍼런스: 흰 글자만, 얇은 그림자 1px (검은 외곽선 없음)."""
+    x, y = xy
+    draw.text((x + 1, y + 1), text, font=font, fill=(0, 0, 0, 72))
+    draw.text((x, y), text, font=font, fill=fill)
+
+
+def _boa_photo_headline_lines(
+    article: Dict[str, Any], title: str, subtitle: str
+) -> Tuple[str, str]:
+    ko1 = str(article.get("_ko_line1") or "").strip()
+    ko2 = str(article.get("_ko_line2") or "").strip()
+    if ko1:
+        line1 = ko1
+        if _has_cjk(line1) and not line1.endswith((",", "，", ":", "·", "—")) and len(line1) <= 36:
+            line1 = line1 + ","
+        return line1[:90], (ko2 or subtitle or "")[:140]
+    line1, line2 = _headline_split_photo(title, subtitle)
+    return line1, line2
+
+
+def _composite_watermark(rgba: Image.Image) -> None:
+    wp = _watermark_path()
+    if not wp or Image is None:
+        return
+    try:
+        mark = Image.open(wp).convert("RGBA")
+        size = int(min(W, H) * 0.075)
+        size = max(48, min(size, 88))
+        mark = mark.resize((size, size), Image.Resampling.LANCZOS)
+        mx = W - size - 40
+        my = H - size - 36
+        layer = Image.new("RGBA", rgba.size, (0, 0, 0, 0))
+        layer.paste(mark, (mx, my), mark)
+        rgba.alpha_composite(layer)
+    except Exception as e:
+        print(f"[telegram_single_card] watermark skip: {repr(e)}")
 
 
 def _download_image(url: str, timeout: int = 12) -> Optional[Image.Image]:
@@ -643,49 +757,29 @@ def _render_template_photo(article: Dict[str, Any], out_path: str) -> str:
 
     rgba = base.convert("RGBA")
     _apply_photo_bottom_gradient(rgba)
+    _composite_watermark(rgba)
     draw = ImageDraw.Draw(rgba)
 
     top_left = (os.getenv("CARD_TOP_LEFT_LABEL") or "").strip()
     brand = (os.getenv("CARD_BRAND_LABEL") or "").strip()
     if top_left:
-        f_tl = _load_font(22)
-        _draw_text_outlined(
-            draw,
-            (PAD_X, 40),
-            top_left,
-            f_tl,
-            fill=(252, 252, 255, 255),
-            outline=(6, 8, 18, 200),
-        )
+        f_tl = _load_font_regular(22)
+        _draw_text_photo(draw, (PAD_X, 40), top_left, f_tl)
     elif brand:
-        f_tl = _load_font(22)
-        _draw_text_outlined(
-            draw,
-            (PAD_X, 40),
-            brand,
-            f_tl,
-            fill=(252, 252, 255, 255),
-            outline=(6, 8, 18, 200),
-        )
+        f_tl = _load_font_regular(22)
+        _draw_text_photo(draw, (PAD_X, 40), brand, f_tl)
 
     max_text_w = W - 2 * PAD_X
-    line1, line2 = _headline_split_photo(title, subtitle)
-    combined = len(line1) + len(line2)
-    if combined > 260:
-        h1s, h2s, m1, m2 = 38, 28, 3, 7
-    elif combined > 190:
-        h1s, h2s, m1, m2 = 44, 32, 2, 6
-    elif combined > 130:
-        h1s, h2s, m1, m2 = 52, 34, 2, 5
-    else:
-        h1s, h2s, m1, m2 = 60, 38, 2, 4
+    line1, line2 = _boa_photo_headline_lines(article, title, subtitle)
 
-    f_h1 = _load_font(h1s)
-    f_h2 = _load_font(h2s)
-    h1_lines = _wrap_lines(draw, line1, f_h1, max_text_w)[:m1]
+    h1s = BOA_H1_PX if len(line1) <= 22 else max(48, BOA_H1_PX - 8)
+    h2s = BOA_H2_PX
+    f_h1 = _load_font_bold(h1s)
+    f_h2 = _load_font_regular(h2s)
+    h1_lines = _wrap_lines(draw, line1, f_h1, max_text_w)[:2]
     if not h1_lines and line1:
         h1_lines = [line1[:100]]
-    h2_lines = _wrap_lines(draw, line2, f_h2, max_text_w)[:m2] if line2 else []
+    h2_lines = _wrap_lines(draw, line2, f_h2, max_text_w)[:2] if line2 else []
 
     body_chk = line1 + line2
     if _has_cjk(body_chk) and not _resolve_font_path():
@@ -694,48 +788,32 @@ def _render_template_photo(article: Dict[str, Any], out_path: str) -> str:
             "nixpacks fonts-noto-cjk 또는 assets/fonts/ 에 폰트 필요"
         )
 
-    lh1 = max(int(h1s * 1.12), 28)
-    lh2 = max(int(h2s * 1.12), 24)
-    f_src = _load_font(21)
-    src_line = source if source else "AP / Reuters 등"
-    src_h = int(lh2 * 0.85)
-    gap = 18
-    block_h = len(h1_lines) * lh1 + len(h2_lines) * lh2 + gap + src_h
-    top_pad = 108 if (top_left or brand) else 72
-    y_text_top = max(top_pad, H - int(H * 0.44) - block_h // 4, H - block_h - 50)
-    y_text_top = min(y_text_top, H - block_h - 28)
+    lh1 = max(int(h1s * 1.18), 34)
+    lh2 = max(int(h2s * 1.22), 28)
+    gap = 14
+    block_h = len(h1_lines) * lh1 + len(h2_lines) * lh2 + gap
+    if CARD_PHOTO_SHOW_SOURCE:
+        block_h += 28
+    y = H - BOA_BOTTOM_MARGIN - block_h
 
-    y = y_text_top
     for ln in h1_lines:
-        _draw_text_outlined(
-            draw,
-            (PAD_X, y),
-            ln,
-            f_h1,
-            fill=(255, 255, 255, 255),
-            outline=(4, 6, 14, 235),
-        )
+        _draw_text_photo(draw, (PAD_X, int(y)), ln, f_h1)
         y += lh1
     for ln in h2_lines:
-        _draw_text_outlined(
-            draw,
-            (PAD_X, y),
-            ln,
-            f_h2,
-            fill=(245, 248, 255, 255),
-            outline=(4, 6, 14, 210),
-        )
+        _draw_text_photo(draw, (PAD_X, int(y)), ln, f_h2, fill=(248, 250, 255, 255))
         y += lh2
 
-    y += gap // 2
-    _draw_text_outlined(
-        draw,
-        (PAD_X, min(y, H - 44)),
-        src_line,
-        f_src,
-        fill=(210, 218, 232, 255),
-        outline=(2, 4, 10, 200),
-    )
+    if CARD_PHOTO_SHOW_SOURCE:
+        f_src = _load_font_regular(20)
+        src_line = source if source else ""
+        if src_line:
+            _draw_text_photo(
+                draw,
+                (PAD_X, int(y + gap)),
+                src_line,
+                f_src,
+                fill=(200, 208, 220, 255),
+            )
 
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     rgba.convert("RGB").save(out_path, "JPEG", quality=93, optimize=True)
