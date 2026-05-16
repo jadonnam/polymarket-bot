@@ -27,10 +27,12 @@ except ImportError:  # pragma: no cover
 W, H = 1080, 1350
 PAD_X = 56
 BOTTOM_ZONE = 620
-# NewsAPI urlToImage는 기사와 안 맞는 경우가 많아 기본은 끔(그라데이션 배경)
+# NewsAPI urlToImage — 차트·무관 썸네일이 많아 기본 off. photo(BoA형)는 env와 무관하게 항상 폴백만.
 TELEGRAM_CARD_USE_NEWS_IMAGE = (os.getenv("TELEGRAM_CARD_USE_NEWS_IMAGE") or "false").lower() == "true"
 _CARD_TMPL = (os.getenv("CARD_TEMPLATE") or "photo").strip().lower()
 CARD_TEMPLATE = _CARD_TMPL if _CARD_TMPL in ("photo", "badge", "quote") else "photo"
+
+_discovered_cjk_font: Optional[str] = None
 
 
 def _openai_headline_enabled() -> bool:
@@ -101,36 +103,107 @@ def _card_title_subtitle_from_article(article: Dict[str, Any]) -> Tuple[str, str
     return _clamp_title(article.get("title", "") or ""), _subtitle_from_article(article)
 
 
+def _discover_cjk_font_path() -> Optional[str]:
+    """Linux(Railway) 등: apt fonts-noto-cjk 설치 경로를 glob으로 찾음."""
+    global _discovered_cjk_font
+    if _discovered_cjk_font is not None:
+        return _discovered_cjk_font or None
+    bundled_dir = os.path.join(os.path.dirname(__file__), "assets", "fonts")
+    for name in (
+        "NotoSansCJK-Bold.otf",
+        "NotoSansCJK-Regular.otf",
+        "NotoSansKR-Bold.otf",
+        "NotoSansKR-Regular.otf",
+    ):
+        p = os.path.join(bundled_dir, name)
+        if os.path.isfile(p):
+            _discovered_cjk_font = p
+            print(f"[telegram_single_card] bundled CJK font: {p}")
+            return p
+    import glob
+
+    globs = [
+        "/usr/share/fonts/**/NotoSansCJK-Bold.ttc",
+        "/usr/share/fonts/**/NotoSansCJK-Bold.otf",
+        "/usr/share/fonts/**/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/**/NotoSansCJK-Regular.otf",
+        "/usr/share/fonts/**/NotoSansKR-Bold.otf",
+        "/usr/share/fonts/**/NotoSansKR-Regular.otf",
+        "/usr/share/fonts/**/NanumGothicBold.ttf",
+        "/usr/share/fonts/**/NanumGothic.ttf",
+    ]
+    for pattern in globs:
+        for p in sorted(glob.glob(pattern, recursive=True)):
+            if os.path.isfile(p):
+                _discovered_cjk_font = p
+                print(f"[telegram_single_card] discovered CJK font: {p}")
+                return p
+    _discovered_cjk_font = ""
+    return None
+
+
 def _font_candidates() -> List[str]:
     env = (os.getenv("CARD_FONT_PATH") or "").strip()
     out: List[str] = []
     if env:
         out.append(env)
+    discovered = _discover_cjk_font_path()
+    if discovered:
+        out.append(discovered)
     out.extend(
         [
             r"C:\Windows\Fonts\malgunbd.ttf",
             r"C:\Windows\Fonts\malgun.ttf",
-            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.otf",
-            "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.otf",
-            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
             "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.otf",
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.otf",
+            "/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc",
+            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
             "/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf",
             "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         ]
     )
-    return out
+    seen: set = set()
+    deduped: List[str] = []
+    for p in out:
+        if p and p not in seen:
+            seen.add(p)
+            deduped.append(p)
+    return deduped
+
+
+_cached_font_path: Optional[str] = None
+
+
+def _resolve_font_path() -> Optional[str]:
+    global _cached_font_path
+    if _cached_font_path:
+        return _cached_font_path
+    for path in _font_candidates():
+        if path and os.path.isfile(path):
+            try:
+                ImageFont.truetype(path, size=24)
+                _cached_font_path = path
+                print(f"[telegram_single_card] active font: {path}")
+                return path
+            except Exception:
+                continue
+    return None
 
 
 def _load_font(size: int) -> Any:
-    for path in _font_candidates():
-        if not path or not os.path.isfile(path):
-            continue
+    path = _resolve_font_path()
+    if path:
         try:
             return ImageFont.truetype(path, size=size)
         except Exception:
-            continue
+            pass
+    if _has_cjk("가"):
+        print(
+            "[telegram_single_card] WARNING: CJK font missing — "
+            "한글이 네모/깨질 수 있음. Railway: fonts-noto-cjk 또는 CARD_FONT_PATH"
+        )
     return ImageFont.load_default()
 
 
@@ -194,7 +267,18 @@ def _pick_fallback_background_path(article: Dict[str, Any]) -> Optional[str]:
 
     rules: List[Tuple[Tuple[str, ...], str]] = [
         (
-            ("iran", "israel", "war", "attack", "missile", "ceasefire", "military"),
+            (
+                "iran",
+                "israel",
+                "ukraine",
+                "russia",
+                "war",
+                "attack",
+                "missile",
+                "ceasefire",
+                "military",
+                "airstrike",
+            ),
             "market_01.jpg",
         ),
         (
@@ -533,8 +617,8 @@ def _tech_datacenter_background(tw: int, th: int) -> Image.Image:
 def _render_template_photo(article: Dict[str, Any], out_path: str) -> str:
     """
     BoA / 삼성형 레퍼런스: 전면 사진 + 하단 그라데이션 + 좌측 큰 제목(패널 박스 없음).
-    - TELEGRAM_CARD_USE_NEWS_IMAGE=true 이고 urlToImage 유효 시 기사 이미지
-    - 아니면 assets/fallbacks 키워드 스톡 → 최후 solid
+    - 배경: assets/fallbacks 키워드 스톡만 (urlToImage 미사용 — 차트 썸네일 방지)
+    - 최후 solid
     """
     if Image is None:
         raise RuntimeError("Pillow(PIL) 미설치")
@@ -542,21 +626,8 @@ def _render_template_photo(article: Dict[str, Any], out_path: str) -> str:
     title, subtitle = _card_title_subtitle_from_article(article)
     source = news_module.article_source_name(article)
 
-    bg_url = _article_image_url(article)
     base: Optional[Image.Image] = None
     bg_mode = "solid"
-
-    if TELEGRAM_CARD_USE_NEWS_IMAGE and bg_url:
-        bg = _download_image(bg_url)
-        if bg is not None:
-            if ImageFilter is not None:
-                try:
-                    bg = bg.filter(ImageFilter.GaussianBlur(radius=1.2))
-                except Exception:
-                    pass
-            base = _cover_background(bg, W, H)
-            bg_mode = "article_image"
-            print(f"[telegram_single_card] bg_mode=article_image url={bg_url[:72]}…")
 
     if base is None:
         fp = _pick_fallback_background_path(article)
@@ -566,13 +637,7 @@ def _render_template_photo(article: Dict[str, Any], out_path: str) -> str:
                 bg_mode = f"fallback:{os.path.basename(fp)}"
                 print(f"[telegram_single_card] bg_mode={bg_mode}")
         if base is None:
-            if bg_url and not TELEGRAM_CARD_USE_NEWS_IMAGE:
-                print(
-                    "[telegram_single_card] bg_mode=solid "
-                    "(no fallback file — TELEGRAM_CARD_USE_NEWS_IMAGE=false)"
-                )
-            else:
-                print("[telegram_single_card] bg_mode=solid (no usable image)")
+            print("[telegram_single_card] bg_mode=solid (fallback file missing)")
             base = _solid_background(W, H)
             bg_mode = "solid"
 
@@ -623,9 +688,10 @@ def _render_template_photo(article: Dict[str, Any], out_path: str) -> str:
     h2_lines = _wrap_lines(draw, line2, f_h2, max_text_w)[:m2] if line2 else []
 
     body_chk = line1 + line2
-    if _has_cjk(body_chk) and not os.getenv("CARD_FONT_PATH"):
+    if _has_cjk(body_chk) and not _resolve_font_path():
         print(
-            "[telegram_single_card] CJK 문자 포함 — Railway/Linux에서는 CARD_FONT_PATH(NotoSansKR 등) 설정 권장"
+            "[telegram_single_card] CJK headline but no CJK font — "
+            "nixpacks fonts-noto-cjk 또는 assets/fonts/ 에 폰트 필요"
         )
 
     lh1 = max(int(h1s * 1.12), 28)
@@ -802,6 +868,11 @@ def render_single_card(article: Dict[str, Any], out_path: str) -> str:
         return _render_template_badge(article, out_path)
     if CARD_TEMPLATE == "quote":
         return _render_template_quote(article, out_path)
+    if TELEGRAM_CARD_USE_NEWS_IMAGE:
+        print(
+            "[telegram_single_card] TELEGRAM_CARD_USE_NEWS_IMAGE=true — "
+            "photo 템플릿에서는 무시, assets/fallbacks 배경만 사용"
+        )
     return _render_template_photo(article, out_path)
 
 

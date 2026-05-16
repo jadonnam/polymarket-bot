@@ -3,3 +3,6 @@
 
 [phases.setup]
 aptPkgs = ["fonts-noto-cjk", "fontconfig"]
+
+[phases.build]
+cmds = ["fc-cache -f -v || true"]
