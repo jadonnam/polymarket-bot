@@ -939,18 +939,20 @@ def _render_template_quote(article: Dict[str, Any], out_path: str) -> str:
 
 
 def render_single_card(article: Dict[str, Any], out_path: str) -> str:
+    """단일 카드 = BoA 레퍼런스 photo 1장 고정 (1080×1350, badge/quote 미사용)."""
     if Image is None:
         raise RuntimeError("Pillow(PIL) 미설치")
-    print(f"[telegram_single_card] CARD_TEMPLATE={CARD_TEMPLATE}")
-    if CARD_TEMPLATE == "badge":
-        return _render_template_badge(article, out_path)
-    if CARD_TEMPLATE == "quote":
-        return _render_template_quote(article, out_path)
+    if CARD_TEMPLATE not in ("photo",):
+        print(
+            f"[telegram_single_card] CARD_TEMPLATE={CARD_TEMPLATE!r} — "
+            "단일 카드는 photo(BoA 레퍼런스)만 사용"
+        )
     if TELEGRAM_CARD_USE_NEWS_IMAGE:
         print(
             "[telegram_single_card] TELEGRAM_CARD_USE_NEWS_IMAGE=true — "
-            "photo 템플릿에서는 무시, assets/fallbacks 배경만 사용"
+            "photo에서는 무시, ref_photo_bank + fallbacks만"
         )
+    print("[telegram_single_card] mode=single_photo_boa")
     return _render_template_photo(article, out_path)
 
 
@@ -966,8 +968,11 @@ def build_telegram_caption(article: Dict[str, Any]) -> str:
     minimal = (os.getenv("TELEGRAM_CAPTION_MINIMAL") or "true").lower() == "true"
     if minimal:
         parts: List[str] = []
+        ko2 = str(article.get("_ko_line2") or "").strip()
         if title:
             parts.append("📌 " + title[:480])
+        if ko2 and ko2 not in title:
+            parts.append(ko2[:360])
         if url:
             parts.append(f"원문: {url}")
         elif src:
@@ -1015,9 +1020,13 @@ def _is_valid_card_jpeg(path: Optional[str], min_bytes: int = 2800) -> bool:
 
 
 def _render_minimal_fallback_card(article: Dict[str, Any], out_path: str) -> str:
-    """고급 템플릿 실패 시에도 JPEG는 반드시 나오게 하는 최소 카드."""
+    """1차: BoA photo와 동일 경로. 실패 시에만 단순 solid 카드."""
     if Image is None:
         raise RuntimeError("Pillow(PIL) 미설치")
+    try:
+        return _render_template_photo(article, out_path)
+    except Exception as e:
+        print(f"[telegram_single_card] photo fallback retry as solid: {repr(e)}")
     ko1 = str(article.get("_ko_line1") or "").strip()
     title = news_module.clean_spaces(
         ko1 if ko1 else (article.get("title", "") or "")
@@ -1102,7 +1111,7 @@ def run_telegram_single_card(
     os.makedirs(out_dir, exist_ok=True)
     safe_key = news_module.dedup_key(article)[:40].replace(" ", "_")
     safe_key = re.sub(r"[^a-zA-Z0-9가-힣_\-]", "", safe_key) or "card"
-    out_path = os.path.join(out_dir, f"telegram_single_card_{safe_key}_{CARD_TEMPLATE}.jpg")
+    out_path = os.path.join(out_dir, f"telegram_single_card_{safe_key}_photo.jpg")
     fb_path = os.path.join(out_dir, f"telegram_single_card_{safe_key}_fallback.jpg")
     try:
         path = render_single_card(article, out_path)

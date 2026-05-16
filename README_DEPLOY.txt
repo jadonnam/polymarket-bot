@@ -1,11 +1,11 @@
 카드뉴스 전용 자동화 배포 가이드
 
 최종 정책:
-- 릴스 자동화 중단
-- Telegram 저장 채널 위주 (단일 카드 1장 + 캡션, 또는 텍스트 브리핑 폴백)
-- 인스타 자동업로드 없음
-- OpenAI 이미지 생성 없음
-- 템플릿 고정 + 데이터만 변경
+- **단일 카드 1장** — BoA 레퍼런스(`ref_photo_bank.png` 레이아웃) photo 고정, 캐러셀·릴스 없음
+- Telegram 저장 채널 (JPEG 1장 + 짧은 캡션) 또는 텍스트 브리핑 폴백
+- 인스타 자동업로드 없음 (연동 시 upload_instagram 별도)
+- 카드 배경: urlToImage 미사용, ref + assets/fallbacks
+- 한글 제목·부제: OPENAI_API_KEY + CARD_HEADLINE_OPENAI=auto 권장
 
 0) 워커 동작
 - `python main_instagram.py`는 `CHECK_INTERVAL`(초)마다 `main()`을 반복 실행합니다.
