@@ -1093,6 +1093,7 @@ def run_telegram_single_card(
     *,
     articles: Optional[List[Dict[str, Any]]] = None,
     out_dir: str = "output_telegram_card",
+    lead_article: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
     """기사 선별 → 1장 JPEG 생성 → (경로, 기사) 반환. 전송은 호출측."""
     if Image is None:
@@ -1103,7 +1104,9 @@ def run_telegram_single_card(
     if arts is None:
         arts = news_module.fetch_news(limit=40, hours_back=36) or []
 
-    article = pick_article_for_single_card(arts)
+    article = dict(lead_article) if lead_article else None
+    if article is None:
+        article = pick_article_for_single_card(arts)
     if article is None:
         _rs, relaxed = best_single_card_candidate_relaxed(arts)
         if relaxed is not None:
@@ -1122,11 +1125,14 @@ def run_telegram_single_card(
     )
 
     article = dict(article)
-    ko_lines = _try_openai_korean_card_lines(article)
-    if ko_lines:
-        article["_ko_line1"], article["_ko_line2"] = ko_lines
+    if str(article.get("_ko_line1") or "").strip():
+        print("[card_ko] reference_pipeline lines")
     else:
-        print("[card_ko] no korean lines — OPENAI_API_KEY / CARD_HEADLINE_OPENAI 확인")
+        ko_lines = _try_openai_korean_card_lines(article)
+        if ko_lines:
+            article["_ko_line1"], article["_ko_line2"] = ko_lines
+        else:
+            print("[card_ko] no korean lines — OPENAI_API_KEY 확인")
 
     skip_no_font = (os.getenv("TELEGRAM_SKIP_CARD_WITHOUT_FONT") or "true").lower() == "true"
     if skip_no_font and not _resolve_font_path():

@@ -83,6 +83,10 @@ FORCE_CARD_TEST = (os.getenv("FORCE_CARD_TEST") or "false").lower() == "true"
 TEXT_BRIEFING_ONLY = (os.getenv("TEXT_BRIEFING_ONLY") or "true").lower() == "true"
 TELEGRAM_SINGLE_CARD = (os.getenv("TELEGRAM_SINGLE_CARD") or "true").lower() == "true"
 TELEGRAM_SEND_DESK_BRIEFING = (os.getenv("TELEGRAM_SEND_DESK_BRIEFING") or "true").lower() == "true"
+# true: 텔레그램에 레퍼런스 생성용 system 프롬프트 스냅샷 1통 추가 (디버그)
+TELEGRAM_SEND_REFERENCE_PROMPT = (
+    os.getenv("TELEGRAM_SEND_REFERENCE_PROMPT") or "false"
+).lower() == "true"
 # 인스타 자동 업로드는 사용하지 않음 (수동 게시만). 코드에 남아 있어도 호출하지 않음.
 NEWS_API_KEY_SET = bool((os.getenv("NEWS_API_KEY") or "").strip())
 OFF_SCHEDULE_ISSUE_ENABLED = (os.getenv("OFF_SCHEDULE_ISSUE_ENABLED") or "true").lower() == "true"
@@ -708,37 +712,72 @@ def _log_final_card_size(path: str) -> None:
     print(f"[final_card] {base} size={label}")
 
 
-def _build_desk_text(
+def _send_reference_telegram(
     articles: List[Dict[str, Any]],
-    lead_article: Optional[Dict[str, Any]],
-) -> str:
-    from desk_briefing import build_desk_briefing_text
+    lead_article: Dict[str, Any],
+) -> bool:
+    """
+    레퍼런스 프롬프트 1회(OpenAI) → DESK 텍스트 + BoA 카드(선택) 텔레그램 전송.
+    """
+    if not ENABLE_TELEGRAM_STORAGE:
+        return False
+    send_fn = send_storage_message or send_storage_text
+    if send_fn is None and send_storage_image is None:
+        return False
 
-    return build_desk_briefing_text(
+    from desk_briefing import build_desk_with_pack
+    from reference_pipeline import apply_pack_to_article, get_system_prompt_for_debug
+    from telegram_single_card import build_telegram_caption, run_telegram_single_card
+
+    try:
+        market_data = fetch_market_data_bundle()
+    except Exception as e:
+        print(f"[reference_pipeline] market_data failed: {repr(e)}")
+        market_data = {}
+
+    pack, desk = build_desk_with_pack(
         articles=articles,
-        market_data=fetch_market_data_bundle(),
+        market_data=market_data,
         lead_article=lead_article,
     )
+    picked = apply_pack_to_article(lead_article, pack)
+    sent_any = False
 
+    if TELEGRAM_SEND_REFERENCE_PROMPT and send_fn:
+        snap = get_system_prompt_for_debug()
+        if len(snap) > 4000:
+            snap = snap[:3997] + "…"
+        try:
+            send_fn("[레퍼런스 프롬프트]\n" + snap)
+            print("[telegram_storage_send] reference prompt snapshot ok")
+        except Exception as e:
+            print(f"[reference_pipeline] prompt snapshot failed: {repr(e)}")
 
-def _send_desk_briefing_message(
-    articles: List[Dict[str, Any]],
-    lead_article: Optional[Dict[str, Any]],
-) -> Optional[str]:
-    """BoA 카드 다음 메시지로 자돈남 DESK 형식 텍스트 전송. 생성 텍스트 반환."""
-    if not TELEGRAM_SEND_DESK_BRIEFING or not ENABLE_TELEGRAM_STORAGE:
-        return None
-    send_fn = send_storage_message or send_storage_text
-    if send_fn is None:
-        return None
-    try:
-        desk = _build_desk_text(articles, lead_article)
-        send_fn(desk)
-        print("[telegram_storage_send] desk briefing ok")
-        return desk
-    except Exception as e:
-        print(f"[desk_briefing] send failed: {repr(e)}")
-        return None
+    if TELEGRAM_SEND_DESK_BRIEFING and send_fn and desk:
+        try:
+            send_fn(desk)
+            print("[telegram_storage_send] desk briefing ok (reference)")
+            sent_any = True
+        except Exception as e:
+            print(f"[reference_pipeline] desk send failed: {repr(e)}")
+
+    if TELEGRAM_SINGLE_CARD:
+        card_path, _picked = run_telegram_single_card(
+            articles=articles,
+            out_dir=TELEGRAM_CARD_OUT_DIR,
+            lead_article=picked,
+        )
+        if card_path and send_storage_image is not None:
+            try:
+                send_storage_image(card_path, build_telegram_caption(picked))
+                print("[telegram_storage_send] reference card photo ok")
+                sent_any = True
+            except Exception as e:
+                print(f"[reference_pipeline] card send failed: {repr(e)}")
+        elif not card_path:
+            print("[reference_pipeline] card skipped — DESK only")
+
+    return sent_any
 
 
 def _briefing_fetch_build_write_send(
@@ -1184,76 +1223,30 @@ def main() -> None:
                     allow_send = True
 
                 if allow_send:
-                    if TELEGRAM_SINGLE_CARD:
-                        from telegram_single_card import (
-                            build_telegram_caption,
-                            run_telegram_single_card,
-                        )
+                    print("[reference_pipeline] 레퍼런스 DESK+카드 텔레그램 전송")
+                    arts = (
+                        cached_arts
+                        if cached_arts is not None
+                        else fetch_news_articles(hours_back=36, limit=40)
+                    )
+                    lead = iss_cand
+                    if lead is None and TELEGRAM_SINGLE_CARD:
+                        from telegram_single_card import pick_article_for_single_card
 
-                        print("[market_briefing] content_mode=single_trusted_news")
-                        arts = (
-                            cached_arts
-                            if cached_arts is not None
-                            else fetch_news_articles(hours_back=36, limit=40)
-                        )
-                        card_path, picked = run_telegram_single_card(
-                            articles=arts,
-                            out_dir=TELEGRAM_CARD_OUT_DIR,
-                        )
-                        if picked and ENABLE_TELEGRAM_STORAGE:
-                            sent_any = False
-                            if (
-                                card_path
-                                and send_storage_image is not None
-                            ):
-                                try:
-                                    send_storage_image(
-                                        card_path,
-                                        build_telegram_caption(picked),
-                                    )
-                                    print("[telegram_storage_send] photo ok")
-                                    sent_any = True
-                                except Exception as e:
-                                    print(
-                                        f"[telegram_single_card] send_storage_image failed: {repr(e)}"
-                                    )
-                            elif not card_path:
-                                print(
-                                    "[telegram_single_card] 카드 생략 — DESK 텍스트만 전송"
-                                )
-                            if TELEGRAM_SEND_DESK_BRIEFING:
-                                if _send_desk_briefing_message(arts, picked):
-                                    sent_any = True
-                            if sent_any:
-                                print("[briefing_only] telegram send ok (desk ± card)")
-                                if not FORCE_CARD_TEST:
-                                    if not SIGNAL_DRIVEN_SEND and slot_active:
-                                        mark_regular_sent()
-                                    record_telegram_card_sent(
-                                        picked,
-                                        off_schedule=record_off_schedule,
-                                    )
-                            else:
-                                *_ignore, sent_ok = _briefing_fetch_build_write_send(
-                                    delivery="text_market_briefing"
-                                )
-                                if sent_ok:
-                                    print("[telegram_storage_send] legacy briefing ok")
-                                    if not FORCE_CARD_TEST:
-                                        if not SIGNAL_DRIVEN_SEND and slot_active:
-                                            mark_regular_sent()
-                        elif not picked:
-                            print("[telegram_single_card] 후보 없음 — 전송 스킵")
+                        lead = pick_article_for_single_card(arts)
+                    if lead is None:
+                        print("[reference_pipeline] 후보 기사 없음 — 전송 스킵")
+                    elif _send_reference_telegram(arts, lead):
+                        print("[briefing_only] telegram send ok (reference)")
+                        if not FORCE_CARD_TEST:
+                            if not SIGNAL_DRIVEN_SEND and slot_active:
+                                mark_regular_sent()
+                            record_telegram_card_sent(
+                                lead,
+                                off_schedule=record_off_schedule,
+                            )
                     else:
-                        *_ignore, sent_ok = _briefing_fetch_build_write_send(
-                            delivery="text_market_briefing"
-                        )
-                        if sent_ok:
-                            print("[telegram_storage_send] text ok")
-                            print("[briefing_only] send text only")
-                            if not FORCE_CARD_TEST:
-                                if not SIGNAL_DRIVEN_SEND and slot_active:
-                                    mark_regular_sent()
+                        print("[reference_pipeline] 전송 실패")
                 else:
                     print(
                         "[briefing_only] skip send: "
