@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import requests
 
 import news as news_module
+from card_backgrounds import build_card_background
 
 try:
     from PIL import Image, ImageDraw, ImageFilter, ImageFont
@@ -28,8 +29,8 @@ W, H = 1080, 1350
 PAD_X = 48
 BOTTOM_ZONE = 620
 # BoA/삼성형 레퍼런스 (1080×1350) — assets/card_references/ref_photo_bank.png 기준
-BOA_H1_PX = 62
-BOA_H2_PX = 36
+BOA_H1_PX = 64
+BOA_H2_PX = 38
 BOA_BOTTOM_MARGIN = 72
 BOA_GRADIENT_START = 0.42
 CARD_PHOTO_SHOW_SOURCE = (os.getenv("CARD_PHOTO_SHOW_SOURCE") or "false").lower() == "true"
@@ -116,10 +117,10 @@ def _discover_cjk_font_path() -> Optional[str]:
         return _discovered_cjk_font or None
     bundled_dir = os.path.join(os.path.dirname(__file__), "assets", "fonts")
     for name in (
-        "NotoSansCJK-Bold.otf",
-        "NotoSansCJK-Regular.otf",
         "NotoSansKR-Bold.otf",
         "NotoSansKR-Regular.otf",
+        "NotoSansCJK-Bold.otf",
+        "NotoSansCJK-Regular.otf",
     ):
         p = os.path.join(bundled_dir, name)
         if os.path.isfile(p):
@@ -187,14 +188,20 @@ def _resolve_font_path() -> Optional[str]:
     if _cached_font_path:
         return _cached_font_path
     for path in _font_candidates():
-        if path and os.path.isfile(path):
-            try:
-                ImageFont.truetype(path, size=24)
-                _cached_font_path = path
-                print(f"[telegram_single_card] active font: {path}")
-                return path
-            except Exception:
+        if not path or not os.path.isfile(path):
+            continue
+        try:
+            if os.path.getsize(path) < 50_000:
                 continue
+        except OSError:
+            continue
+        try:
+            ImageFont.truetype(path, size=24)
+            _cached_font_path = path
+            print(f"[telegram_single_card] active font: {path}")
+            return path
+        except Exception:
+            continue
     return None
 
 
@@ -526,7 +533,25 @@ def _draw_text_outlined(
     draw.text((x, y), text, font=font, fill=fill)
 
 
+def _wrap_lines_cjk(draw: Any, text: str, font: Any, max_width: int) -> List[str]:
+    lines: List[str] = []
+    buf = ""
+    for ch in text.replace("\n", " "):
+        trial = buf + ch
+        if draw.textlength(trial, font=font) <= max_width:
+            buf = trial
+            continue
+        if buf:
+            lines.append(buf)
+        buf = ch
+    if buf:
+        lines.append(buf)
+    return lines
+
+
 def _wrap_lines(draw: Any, text: str, font: Any, max_width: int) -> List[str]:
+    if _has_cjk(text):
+        return _wrap_lines_cjk(draw, text, font, max_width)
     lines: List[str] = []
     for paragraph in text.split("\n"):
         paragraph = paragraph.strip()
@@ -740,20 +765,13 @@ def _render_template_photo(article: Dict[str, Any], out_path: str) -> str:
     title, subtitle = _card_title_subtitle_from_article(article)
     source = news_module.article_source_name(article)
 
-    base: Optional[Image.Image] = None
-    bg_mode = "solid"
-
-    if base is None:
-        fp = _pick_fallback_background_path(article)
-        if fp:
-            base = _open_fallback_cover(fp, W, H)
-            if base is not None:
-                bg_mode = f"fallback:{os.path.basename(fp)}"
-                print(f"[telegram_single_card] bg_mode={bg_mode}")
-        if base is None:
-            print("[telegram_single_card] bg_mode=solid (fallback file missing)")
-            base = _solid_background(W, H)
-            bg_mode = "solid"
+    try:
+        base, bg_mode = build_card_background(article, W, H)
+        print(f"[telegram_single_card] bg_mode={bg_mode}")
+    except Exception as e:
+        print(f"[telegram_single_card] bg build failed: {repr(e)} — solid")
+        base = _solid_background(W, H)
+        bg_mode = "solid"
 
     rgba = base.convert("RGBA")
     _apply_photo_bottom_gradient(rgba)
@@ -772,8 +790,8 @@ def _render_template_photo(article: Dict[str, Any], out_path: str) -> str:
     max_text_w = W - 2 * PAD_X
     line1, line2 = _boa_photo_headline_lines(article, title, subtitle)
 
-    h1s = BOA_H1_PX if len(line1) <= 22 else max(48, BOA_H1_PX - 8)
-    h2s = BOA_H2_PX
+    h1s = BOA_H1_PX if len(line1) <= 24 else max(52, BOA_H1_PX - 6)
+    h2s = BOA_H2_PX if len(line2) <= 40 else max(32, BOA_H2_PX - 4)
     f_h1 = _load_font_bold(h1s)
     f_h2 = _load_font_regular(h2s)
     h1_lines = _wrap_lines(draw, line1, f_h1, max_text_w)[:2]
@@ -1107,6 +1125,8 @@ def run_telegram_single_card(
     ko_lines = _try_openai_korean_card_lines(article)
     if ko_lines:
         article["_ko_line1"], article["_ko_line2"] = ko_lines
+    else:
+        print("[card_ko] no korean lines — OPENAI_API_KEY / CARD_HEADLINE_OPENAI 확인")
 
     os.makedirs(out_dir, exist_ok=True)
     safe_key = news_module.dedup_key(article)[:40].replace(" ", "_")
