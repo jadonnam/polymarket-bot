@@ -9,6 +9,7 @@ import requests
 from PIL import Image
 
 from daily_summary_card import DailySummaryPayload
+from desk_briefing import build_desk_briefing_text
 
 _HTTP_HEADERS = {
     "User-Agent": (
@@ -250,72 +251,13 @@ def build_market_briefing_text(
     market_data: Dict[str, Any],
     articles: List[Dict[str, Any]],
 ) -> str:
-    md = market_data if isinstance(market_data, dict) else {}
-    sd = _slash_date(payload.date_line) or "오늘"
-    k = md.get("korea", {}) if isinstance(md, dict) else {}
-    flows = k.get("flows", {}) if isinstance(k, dict) else {}
-    ttop = list(md.get("trading_top5", []) or [])
-    sect = list(md.get("sector_top5", []) or [])
-    blob = _article_blob(articles)
-
-    p_k, c_k = _quote(md, "KOSPI")
-    p_q, c_q = _quote(md, "KOSDAQ")
-    p_w, c_w = _quote(md, "WTI")
-    p_fx, c_fx = _quote(md, "USDKRW")
-    p_nq, c_nq = _quote(md, "NQ_FUT")
-    p_es, c_es = _quote(md, "ES_FUT")
-    p_ym, c_ym = _quote(md, "YM_FUT")
-    p_10, c_10 = _quote(md, "US10Y")
-
-    hook = _hook_one_line(summary_mode, payload, sect)
-
-    if summary_mode == "korea_close":
-        title = f"{sd}, 한국장 마감 요약"
-        lines = [
-            f"1. 코스피 {c_k}",
-            f"2. 코스닥 {c_q}",
-            f"3. 외국인 {_fmt_flow_cell(flows.get('foreign'))}",
-            f"4. 기관 {_fmt_flow_cell(flows.get('institution'))}",
-            _trading_top_line(ttop),
-            f"6. 강한 섹터: {_sector_line(sect)}",
-            "7. 내일 체크: CPI·지표 일정",
-        ]
-    elif summary_mode == "us_preopen":
-        title = f"{sd}, 미국장 시작 전"
-        l1 = f"1. 나스닥 선물 {c_nq}" if c_nq != "-" else "1. 나스닥 선물 흐름 확인"
-        l2 = f"2. S&P500 선물 {c_es}" if c_es != "-" else "2. S&P500 선물 흐름 확인"
-        l3 = f"3. 미국 10년물 금리 {p_10}%" if p_10 != "-" else "3. 미국 10년물 금리 확인"
-        l4 = f"4. WTI 유가 {p_w}달러" if p_w != "-" else "4. WTI 유가 흐름 확인"
-        l5 = f"5. 달러인덱스 {_dxy_word(md)} · 원달러 {p_fx}원 ({c_fx})"
-        lines = [
-            l1,
-            l2,
-            l3,
-            l4,
-            l5,
-            "6. 오늘 밤 주요 이벤트: CPI·연준 발언",
-            _us_line7_sectors(blob, sect),
-        ]
-    else:
-        title = f"{sd}, 핵심 경제 이슈"
-        t1 = str(articles[0].get("title", "시장 변수 확인")) if articles else "시장 변수 확인"
-        lines = [
-            f"1. {_short(t1, 36)}",
-            f"2. 코스피 {c_k}, 코스닥 {c_q}",
-            f"3. {_flow_word(flows)}",
-            f"4. {_top_names(ttop, 3)}",
-            f"5. {_sector_line(sect)}",
-            _korea_line6_oil(c_w, p_w),
-            "7. 밤 뉴스·지표 플로우 확인",
-        ]
-        if "유가" in blob or "oil" in blob:
-            lines[0] = "1. 국제유가·에너지 변수 부각"
-
-    body = "\n".join(lines[:7])
-    text = f"{title}\n\n{body}\n\n한 줄:\n{hook}"
-    text = re.sub(r"#\S+", "", text)
-    text = re.sub(r"\n{3,}", "\n\n", text).strip()
-    return text
+    """자돈남 DESK 형식 (① 헤드 · ② 해석 · ③ 볼 것). summary_mode는 톤 힌트용."""
+    _ = summary_mode, payload
+    return build_desk_briefing_text(
+        articles=articles,
+        market_data=market_data,
+        lead_article=articles[0] if articles else None,
+    )
 
 
 def build_market_curation_text(

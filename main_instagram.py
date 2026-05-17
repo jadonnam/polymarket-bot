@@ -82,6 +82,7 @@ ENABLE_OPENAI_CARD_IMAGE = (os.getenv("ENABLE_OPENAI_CARD_IMAGE") or "false").lo
 FORCE_CARD_TEST = (os.getenv("FORCE_CARD_TEST") or "false").lower() == "true"
 TEXT_BRIEFING_ONLY = (os.getenv("TEXT_BRIEFING_ONLY") or "true").lower() == "true"
 TELEGRAM_SINGLE_CARD = (os.getenv("TELEGRAM_SINGLE_CARD") or "true").lower() == "true"
+TELEGRAM_SEND_DESK_BRIEFING = (os.getenv("TELEGRAM_SEND_DESK_BRIEFING") or "true").lower() == "true"
 NEWS_API_KEY_SET = bool((os.getenv("NEWS_API_KEY") or "").strip())
 OFF_SCHEDULE_ISSUE_ENABLED = (os.getenv("OFF_SCHEDULE_ISSUE_ENABLED") or "true").lower() == "true"
 OFF_SCHEDULE_MIN_SCORE = int((os.getenv("OFF_SCHEDULE_MIN_SCORE") or "58").strip())
@@ -706,6 +707,30 @@ def _log_final_card_size(path: str) -> None:
     print(f"[final_card] {base} size={label}")
 
 
+def _send_desk_briefing_message(
+    articles: List[Dict[str, Any]],
+    lead_article: Optional[Dict[str, Any]],
+) -> None:
+    """BoA 카드 다음 메시지로 자돈남 DESK 형식 텍스트 전송."""
+    if not TELEGRAM_SEND_DESK_BRIEFING or not ENABLE_TELEGRAM_STORAGE:
+        return
+    send_fn = send_storage_message or send_storage_text
+    if send_fn is None:
+        return
+    try:
+        from desk_briefing import build_desk_briefing_text
+
+        desk = build_desk_briefing_text(
+            articles=articles,
+            market_data=fetch_market_data_bundle(),
+            lead_article=lead_article,
+        )
+        send_fn(desk)
+        print("[telegram_storage_send] desk briefing ok")
+    except Exception as e:
+        print(f"[desk_briefing] send failed: {repr(e)}")
+
+
 def _briefing_fetch_build_write_send(
     *,
     delivery: str,
@@ -1177,7 +1202,8 @@ def main() -> None:
                                     build_telegram_caption(picked),
                                 )
                                 print("[telegram_storage_send] photo ok")
-                                print("[briefing_only] send single card only")
+                                _send_desk_briefing_message(arts, picked)
+                                print("[briefing_only] send card + desk briefing")
                                 if not FORCE_CARD_TEST:
                                     if not SIGNAL_DRIVEN_SEND and slot_active:
                                         mark_regular_sent()
