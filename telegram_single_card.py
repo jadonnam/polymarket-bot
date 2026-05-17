@@ -1128,6 +1128,14 @@ def run_telegram_single_card(
     else:
         print("[card_ko] no korean lines — OPENAI_API_KEY / CARD_HEADLINE_OPENAI 확인")
 
+    skip_no_font = (os.getenv("TELEGRAM_SKIP_CARD_WITHOUT_FONT") or "true").lower() == "true"
+    if skip_no_font and not _resolve_font_path():
+        print(
+            "[telegram_single_card] CJK font 없음 — 깨진 카드 대신 DESK 텍스트만 "
+            "(Railway: fonts-noto-cjk 또는 assets/fonts/NanumGothicBold.ttf)"
+        )
+        return None, article
+
     os.makedirs(out_dir, exist_ok=True)
     safe_key = news_module.dedup_key(article)[:40].replace(" ", "_")
     safe_key = re.sub(r"[^a-zA-Z0-9가-힣_\-]", "", safe_key) or "card"

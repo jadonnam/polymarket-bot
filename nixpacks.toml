@@ -7,5 +7,8 @@ aptPkgs = ["fonts-noto-cjk", "fontconfig"]
 [phases.build]
 cmds = [
   "fc-cache -f -v || true",
+  "mkdir -p assets/fonts",
+  "curl -fsSL -o assets/fonts/NanumGothicBold.ttf https://github.com/naver/nanumfont/raw/refs/heads/master/ttf/NanumGothicBold.ttf || true",
+  "curl -fsSL -o assets/fonts/NanumGothic.ttf https://github.com/naver/nanumfont/raw/refs/heads/master/ttf/NanumGothic.ttf || true",
   "python -c \"from card_backgrounds import generate_geopolitical,generate_tech,generate_commodity,generate_asia,generate_neutral; import os; os.makedirs('assets/fallbacks',exist_ok=True); pairs=[('market_01.jpg',generate_geopolitical),('market_02.jpg',generate_tech),('market_03.jpg',generate_commodity),('market_04.jpg',generate_asia),('market_05.jpg',generate_neutral),('default_market.jpg',generate_neutral)]; [p[1](1080,1350).save('assets/fallbacks/'+p[0],'JPEG',quality=88) for p in pairs]\" || true",
 ]

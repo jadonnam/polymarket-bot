@@ -40,11 +40,6 @@ except Exception:
     send_storage_video = None
 
 try:
-    from instagram_v2 import upload_instagram
-except Exception:
-    upload_instagram = None
-
-try:
     from threads_auto import (
         run_jadonnam_midday_post,
         run_omniflow_single,
@@ -88,8 +83,7 @@ FORCE_CARD_TEST = (os.getenv("FORCE_CARD_TEST") or "false").lower() == "true"
 TEXT_BRIEFING_ONLY = (os.getenv("TEXT_BRIEFING_ONLY") or "true").lower() == "true"
 TELEGRAM_SINGLE_CARD = (os.getenv("TELEGRAM_SINGLE_CARD") or "true").lower() == "true"
 TELEGRAM_SEND_DESK_BRIEFING = (os.getenv("TELEGRAM_SEND_DESK_BRIEFING") or "true").lower() == "true"
-ENABLE_INSTAGRAM_UPLOAD = (os.getenv("ENABLE_INSTAGRAM_UPLOAD") or "false").lower() == "true"
-INSTAGRAM_CAPTION_MODE = (os.getenv("INSTAGRAM_CAPTION_MODE") or "desk").strip().lower()
+# 인스타 자동 업로드는 사용하지 않음 (수동 게시만). 코드에 남아 있어도 호출하지 않음.
 NEWS_API_KEY_SET = bool((os.getenv("NEWS_API_KEY") or "").strip())
 OFF_SCHEDULE_ISSUE_ENABLED = (os.getenv("OFF_SCHEDULE_ISSUE_ENABLED") or "true").lower() == "true"
 OFF_SCHEDULE_MIN_SCORE = int((os.getenv("OFF_SCHEDULE_MIN_SCORE") or "58").strip())
@@ -727,38 +721,6 @@ def _build_desk_text(
     )
 
 
-def _instagram_caption(
-    desk_text: str,
-    picked: Optional[Dict[str, Any]],
-) -> str:
-    """인스타 피드 캡션 — 기본은 DESK 전문, short면 카드 한글 2줄만."""
-    mode = INSTAGRAM_CAPTION_MODE
-    if mode == "short" and picked:
-        from telegram_single_card import build_telegram_caption
-
-        return build_telegram_caption(picked)
-    cap = (desk_text or "").strip()
-    if len(cap) > 2150:
-        cap = cap[:2147] + "…"
-    return cap
-
-
-def _post_instagram_feed(card_path: str, caption: str) -> None:
-    if not ENABLE_INSTAGRAM_UPLOAD:
-        return
-    if upload_instagram is None:
-        print("[instagram] upload_instagram unavailable (instagrapi?)")
-        return
-    if not card_path or not os.path.isfile(card_path):
-        print("[instagram] skip: no card image")
-        return
-    try:
-        upload_instagram(card_path, caption)
-        print("[instagram] feed photo upload attempted")
-    except Exception as e:
-        print(f"[instagram] upload failed: {repr(e)}")
-
-
 def _send_desk_briefing_message(
     articles: List[Dict[str, Any]],
     lead_article: Optional[Dict[str, Any]],
@@ -1238,73 +1200,50 @@ def main() -> None:
                             articles=arts,
                             out_dir=TELEGRAM_CARD_OUT_DIR,
                         )
-                        if (
-                            card_path
-                            and picked
-                            and ENABLE_TELEGRAM_STORAGE
-                            and send_storage_image is not None
-                        ):
-                            try:
-                                send_storage_image(
-                                    card_path,
-                                    build_telegram_caption(picked),
+                        if picked and ENABLE_TELEGRAM_STORAGE:
+                            sent_any = False
+                            if (
+                                card_path
+                                and send_storage_image is not None
+                            ):
+                                try:
+                                    send_storage_image(
+                                        card_path,
+                                        build_telegram_caption(picked),
+                                    )
+                                    print("[telegram_storage_send] photo ok")
+                                    sent_any = True
+                                except Exception as e:
+                                    print(
+                                        f"[telegram_single_card] send_storage_image failed: {repr(e)}"
+                                    )
+                            elif not card_path:
+                                print(
+                                    "[telegram_single_card] 카드 생략 — DESK 텍스트만 전송"
                                 )
-                                print("[telegram_storage_send] photo ok")
-                                desk_txt = _send_desk_briefing_message(arts, picked)
-                                ig_cap = _instagram_caption(desk_txt or "", picked)
-                                _post_instagram_feed(card_path, ig_cap)
-                                print("[briefing_only] send card + desk (+ instagram if enabled)")
+                            if TELEGRAM_SEND_DESK_BRIEFING:
+                                if _send_desk_briefing_message(arts, picked):
+                                    sent_any = True
+                            if sent_any:
+                                print("[briefing_only] telegram send ok (desk ± card)")
                                 if not FORCE_CARD_TEST:
                                     if not SIGNAL_DRIVEN_SEND and slot_active:
                                         mark_regular_sent()
-                                    if picked:
-                                        record_telegram_card_sent(
-                                            picked,
-                                            off_schedule=record_off_schedule,
-                                        )
-                            except Exception as e:
-                                print(f"[telegram_single_card] send_storage_image failed: {repr(e)}")
+                                    record_telegram_card_sent(
+                                        picked,
+                                        off_schedule=record_off_schedule,
+                                    )
+                            else:
                                 *_ignore, sent_ok = _briefing_fetch_build_write_send(
                                     delivery="text_market_briefing"
                                 )
                                 if sent_ok:
-                                    print("[telegram_storage_send] text ok")
-                                    print("[briefing_only] send text only")
+                                    print("[telegram_storage_send] legacy briefing ok")
                                     if not FORCE_CARD_TEST:
                                         if not SIGNAL_DRIVEN_SEND and slot_active:
                                             mark_regular_sent()
-                                        if picked:
-                                            record_telegram_card_sent(
-                                                picked,
-                                                off_schedule=record_off_schedule,
-                                            )
-                        else:
-                            if not card_path or not picked:
-                                print(
-                                    "[telegram_single_card] 카드 생성 불가 — 텍스트 브리핑으로 대체"
-                                )
-                            elif not ENABLE_TELEGRAM_STORAGE:
-                                print(
-                                    "[telegram_single_card] ENABLE_TELEGRAM_STORAGE=false 전송 생략"
-                                )
-                            elif send_storage_image is None:
-                                print(
-                                    "[telegram_single_card] send_storage_image 없음 — 텍스트 브리핑으로 대체"
-                                )
-                            *_ignore, sent_ok = _briefing_fetch_build_write_send(
-                                delivery="text_market_briefing"
-                            )
-                            if sent_ok:
-                                print("[telegram_storage_send] text ok")
-                                print("[briefing_only] send text only")
-                                if not FORCE_CARD_TEST:
-                                    if not SIGNAL_DRIVEN_SEND and slot_active:
-                                        mark_regular_sent()
-                                    if picked:
-                                        record_telegram_card_sent(
-                                            picked,
-                                            off_schedule=record_off_schedule,
-                                        )
+                        elif not picked:
+                            print("[telegram_single_card] 후보 없음 — 전송 스킵")
                     else:
                         *_ignore, sent_ok = _briefing_fetch_build_write_send(
                             delivery="text_market_briefing"
