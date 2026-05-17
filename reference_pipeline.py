@@ -1,5 +1,6 @@
 """
-레퍼런스(자돈남 DESK + BoA 카드 2줄) 한 번의 프롬프트로 생성 → 텔레그램 전송.
+레퍼런스(자돈남 DESK + BoA 카드) 생성용 프롬프트 조립.
+텔레그램에는 프롬프트만 전송(서버 OpenAI 호출 없음).
 """
 from __future__ import annotations
 
@@ -276,5 +277,75 @@ def format_desk_telegram_message(
 
 
 def get_system_prompt_for_debug() -> str:
-    """TELEGRAM_SEND_REFERENCE_PROMPT=true 시 프롬프트 스냅샷용."""
     return SYSTEM_PROMPT
+
+
+def build_reference_user_prompt(
+    articles: List[Dict[str, Any]],
+    *,
+    lead_article: Dict[str, Any],
+    market_data: Optional[Dict[str, Any]] = None,
+) -> str:
+    md = market_data if isinstance(market_data, dict) else {}
+    arts = list(articles or [])
+    if lead_article and lead_article not in arts:
+        arts = [lead_article] + arts
+    lead_title = news_module.clean_spaces(lead_article.get("title", "") or "")
+    lead_url = str(lead_article.get("url") or "").strip()
+    lead_src = news_module.article_source_name(lead_article)
+    lead_block = f"{lead_title}\n출처: {lead_src}"
+    if lead_url:
+        lead_block += f"\nURL: {lead_url}"
+    return (
+        "LEAD ARTICLE:\n"
+        + lead_block
+        + "\n\nALL NEWS:\n"
+        + _news_block(arts)
+        + "\n\nMARKET:\n"
+        + (_quotes_block(md) or "(없음)")
+    )
+
+
+def build_reference_telegram_prompt(
+    articles: List[Dict[str, Any]],
+    *,
+    lead_article: Dict[str, Any],
+    market_data: Optional[Dict[str, Any]] = None,
+) -> str:
+    """레퍼런스대로 생성할 때 쓰는 전체 프롬프트(system + user)."""
+    user = build_reference_user_prompt(
+        articles, lead_article=lead_article, market_data=market_data
+    )
+    return (
+        "=== SYSTEM ===\n"
+        + SYSTEM_PROMPT.strip()
+        + "\n\n=== USER ===\n"
+        + user.strip()
+    )
+
+
+def split_telegram_prompt_chunks(text: str, limit: int = 4090) -> List[str]:
+    """텔레그램 메시지 길이 제한 분할."""
+    t = (text or "").strip()
+    if len(t) <= limit:
+        return [t]
+    raw: List[str] = []
+    rest = t
+    while rest:
+        if len(rest) <= limit:
+            raw.append(rest)
+            break
+        cut = rest.rfind("\n", 0, limit)
+        if cut < limit // 2:
+            cut = limit
+        raw.append(rest[:cut].rstrip())
+        rest = rest[cut:].lstrip()
+    total = len(raw)
+    out: List[str] = []
+    for i, body in enumerate(raw, 1):
+        prefix = f"[{i}/{total}]\n"
+        room = limit - len(prefix)
+        if len(body) > room:
+            body = body[: max(0, room - 1)] + "…"
+        out.append(prefix + body)
+    return out
