@@ -99,7 +99,8 @@ def _openai_desk_sections(
     client = OpenAI(api_key=key)
     model = (os.getenv("OPENAI_HEADLINE_MODEL") or "gpt-4o-mini").strip()
     sys = (
-        "You write a Korean market desk note for Telegram. Style: 자돈남 DESK — tight, "
+        "You write a Korean market desk note for Telegram. ALL output MUST be in Korean "
+        "(한국어 only — no English sentences in bullets). Style: 자돈남 DESK — tight, "
         "readable, semi-formal wire tone. Use 美 韓 日 where natural. "
         'Output JSON only: {"head_lead":"...","head_bullets":["..."],"interpretation":"...","watch":"..."}. '
         "head_lead: one strong headline line (max ~55 chars). "

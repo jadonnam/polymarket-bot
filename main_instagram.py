@@ -40,6 +40,11 @@ except Exception:
     send_storage_video = None
 
 try:
+    from instagram_v2 import upload_instagram
+except Exception:
+    upload_instagram = None
+
+try:
     from threads_auto import (
         run_jadonnam_midday_post,
         run_omniflow_single,
@@ -83,6 +88,8 @@ FORCE_CARD_TEST = (os.getenv("FORCE_CARD_TEST") or "false").lower() == "true"
 TEXT_BRIEFING_ONLY = (os.getenv("TEXT_BRIEFING_ONLY") or "true").lower() == "true"
 TELEGRAM_SINGLE_CARD = (os.getenv("TELEGRAM_SINGLE_CARD") or "true").lower() == "true"
 TELEGRAM_SEND_DESK_BRIEFING = (os.getenv("TELEGRAM_SEND_DESK_BRIEFING") or "true").lower() == "true"
+ENABLE_INSTAGRAM_UPLOAD = (os.getenv("ENABLE_INSTAGRAM_UPLOAD") or "false").lower() == "true"
+INSTAGRAM_CAPTION_MODE = (os.getenv("INSTAGRAM_CAPTION_MODE") or "desk").strip().lower()
 NEWS_API_KEY_SET = bool((os.getenv("NEWS_API_KEY") or "").strip())
 OFF_SCHEDULE_ISSUE_ENABLED = (os.getenv("OFF_SCHEDULE_ISSUE_ENABLED") or "true").lower() == "true"
 OFF_SCHEDULE_MIN_SCORE = int((os.getenv("OFF_SCHEDULE_MIN_SCORE") or "58").strip())
@@ -707,28 +714,69 @@ def _log_final_card_size(path: str) -> None:
     print(f"[final_card] {base} size={label}")
 
 
+def _build_desk_text(
+    articles: List[Dict[str, Any]],
+    lead_article: Optional[Dict[str, Any]],
+) -> str:
+    from desk_briefing import build_desk_briefing_text
+
+    return build_desk_briefing_text(
+        articles=articles,
+        market_data=fetch_market_data_bundle(),
+        lead_article=lead_article,
+    )
+
+
+def _instagram_caption(
+    desk_text: str,
+    picked: Optional[Dict[str, Any]],
+) -> str:
+    """인스타 피드 캡션 — 기본은 DESK 전문, short면 카드 한글 2줄만."""
+    mode = INSTAGRAM_CAPTION_MODE
+    if mode == "short" and picked:
+        from telegram_single_card import build_telegram_caption
+
+        return build_telegram_caption(picked)
+    cap = (desk_text or "").strip()
+    if len(cap) > 2150:
+        cap = cap[:2147] + "…"
+    return cap
+
+
+def _post_instagram_feed(card_path: str, caption: str) -> None:
+    if not ENABLE_INSTAGRAM_UPLOAD:
+        return
+    if upload_instagram is None:
+        print("[instagram] upload_instagram unavailable (instagrapi?)")
+        return
+    if not card_path or not os.path.isfile(card_path):
+        print("[instagram] skip: no card image")
+        return
+    try:
+        upload_instagram(card_path, caption)
+        print("[instagram] feed photo upload attempted")
+    except Exception as e:
+        print(f"[instagram] upload failed: {repr(e)}")
+
+
 def _send_desk_briefing_message(
     articles: List[Dict[str, Any]],
     lead_article: Optional[Dict[str, Any]],
-) -> None:
-    """BoA 카드 다음 메시지로 자돈남 DESK 형식 텍스트 전송."""
+) -> Optional[str]:
+    """BoA 카드 다음 메시지로 자돈남 DESK 형식 텍스트 전송. 생성 텍스트 반환."""
     if not TELEGRAM_SEND_DESK_BRIEFING or not ENABLE_TELEGRAM_STORAGE:
-        return
+        return None
     send_fn = send_storage_message or send_storage_text
     if send_fn is None:
-        return
+        return None
     try:
-        from desk_briefing import build_desk_briefing_text
-
-        desk = build_desk_briefing_text(
-            articles=articles,
-            market_data=fetch_market_data_bundle(),
-            lead_article=lead_article,
-        )
+        desk = _build_desk_text(articles, lead_article)
         send_fn(desk)
         print("[telegram_storage_send] desk briefing ok")
+        return desk
     except Exception as e:
         print(f"[desk_briefing] send failed: {repr(e)}")
+        return None
 
 
 def _briefing_fetch_build_write_send(
@@ -1202,8 +1250,10 @@ def main() -> None:
                                     build_telegram_caption(picked),
                                 )
                                 print("[telegram_storage_send] photo ok")
-                                _send_desk_briefing_message(arts, picked)
-                                print("[briefing_only] send card + desk briefing")
+                                desk_txt = _send_desk_briefing_message(arts, picked)
+                                ig_cap = _instagram_caption(desk_txt or "", picked)
+                                _post_instagram_feed(card_path, ig_cap)
+                                print("[briefing_only] send card + desk (+ instagram if enabled)")
                                 if not FORCE_CARD_TEST:
                                     if not SIGNAL_DRIVEN_SEND and slot_active:
                                         mark_regular_sent()
