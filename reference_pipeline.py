@@ -19,24 +19,28 @@ _DISCLAIMER = (
 )
 
 # 대한민국 인스타 금융·시사 카드뉴스 레퍼런스 (BoA/증권사형 4:5)
-REFERENCE_INSTAGRAM_CARD = """[비주얼]
-· 캔버스 1080×1350 (4:5 세로), 인스타 피드 1장
-· 상단~중앙: 주제에 맞는 실사 배경(인물·현장·산업). 캔들·차트 캡처·표 스크린샷 금지
-· 하단 35~40%: 검정→투명 그라데이션
-· 하단 흰색 굵은 한글 2줄만 (그 외 UI·로고·워터마크 없음)
+REFERENCE_INSTAGRAM_CARD = """[완성 카드 = 배경 + 그라데이션 + 한글 2줄이 한 장에 있어야 함]
+· 1080×1350 (4:5). 상단~중앙: 주제 실사 배경. 차트·캔들·표 캡처 금지
+· 하단 35~40%: 검정→투명 그라데이션(반드시 합성)
+· 그라데이션 위: 흰색 굵은 한글 2줄, 좌측 정렬, 크게(1줄 > 2줄)
+· 로고·워터마크·영문 헤드라인 본문 없음
 
-[카피 톤]
-· 한국 금융 인스타 카드뉴스: 짧고 단정, 과장·이모지·속보 느낌 금지
-· 美 韓 日·티커는 필요할 때만
-· 1줄: 주체·핵심 (끝에 쉼표 자연스러우면 쉼표)
-· 2줄: 맥락·영향 한 문장
-
-[예시]
+[카피]
 뱅크오브아메리카,
 반도체 다음은 소재주가 시장을 이끌 것
 
-이란 전쟁 여파,
-美 휴일 앞 휘발유 4년 만에 최고"""
+[잘못된 결과]
+배경 사진만 있고 한글·그라데이션이 없음 → 실패. 【2】완성 프롬프트 사용."""
+
+# ChatGPT·DALL·E 등 이미지 AI용 원샷 템플릿 (【1】 확정 후 【1】 문구를 그대로 넣음)
+FINISHED_CARD_IMAGE_TEMPLATE = """Create a finished Instagram financial news card, 1080x1350, 4:5 vertical.
+Background: {visual_scene}. Photorealistic editorial news photo, cinematic lighting.
+Bottom 38% of the image: smooth black-to-transparent gradient overlay (must be visible).
+On top of the gradient, render LARGE bold white Korean sans-serif text, left-aligned, bottom area:
+Line 1 (bigger): 「{line1}」
+Line 2 (smaller): 「{line2}」
+The Korean text must be sharp, readable, and part of the image — not omitted.
+Style: Korean brokerage / BoA-style news card. No charts, candlesticks, logos, watermarks, English headlines."""
 
 # desk_briefing 경로용 (텔레그램 프롬프트 전송과 별개)
 _DESK_REF = """① 헤드 · ② 해석 · ③ 볼 것 — 한국어 데스크 노트."""
@@ -405,33 +409,39 @@ def build_reference_telegram_prompt(
         related_block = "(추가 기사 없음 — 리드 기사만 반영)"
 
     lines = [
-        "📱 인스타 카드뉴스 · 생성 프롬프트 (복사 → AI/이미지툴에 붙여넣기)",
+        "📱 인스타 카드뉴스 · 생성 프롬프트",
         "",
-        f"주제 분류: {topic}",
-        f"배경 연출: {visual_hint}",
+        "⚠️ ChatGPT 이미지/DALL·E에 넣을 때",
+        "· 【2】완성(원샷)만 사용 → 한글 2줄+그라데이션 포함된 **완성 카드**",
+        "· 【3】배경만은 Canva·피그마 합성용. 이걸로 생성하면 글자 없는 사진만 나옴(지금 겪은 현상)",
         "",
-        "역할: 대한민국 금융·시사 인스타 **카드형 뉴스** 제작자.",
-        "아래 기사만 보고, 주제에 맞는 **4:5 카드 1장**용 결과만 출력한다.",
+        f"주제: {topic} · 배경 연출: {visual_hint}",
         "",
-        "━━ 대한민국 인스타 카드뉴스 규격 ━━",
+        "역할: 한국 금융 인스타 카드뉴스. 아래 기사 → 출력 【1】~【4】만.",
+        "",
+        "━━ 규격 ━━",
         REFERENCE_INSTAGRAM_CARD.strip(),
         "",
-        "━━ AI에게 요청할 출력 (이 순서만, 설명·JSON 금지) ━━",
+        "━━ 출력 순서 (설명·JSON 금지) ━━",
         "",
-        "【1】카드 하단 한글 2줄",
-        "1줄: (최대 28자, 쉼표 가능)",
-        "2줄: (최대 55자)",
+        "【1】카드 하단 한글 2줄 (확정 카피)",
+        "1줄:",
+        "2줄:",
         "",
-        "【2】배경 이미지 생성 프롬프트 (영문 1문단)",
-        "· photorealistic, editorial news photo, 4:5 vertical",
-        "· 주제와 일치하는 장면, 텍스트·워터마크·차트 없음",
-        "· negative: chart, candlestick, screenshot, infographic, logo, text overlay",
+        "【2】★ 완성 카드 이미지 프롬프트 (영문, ChatGPT 이미지에 이것만 붙여넣기)",
+        "· 【1】의 1·2줄을 아래 템플릿 {line1} {line2}에 **한글 그대로** 넣을 것",
+        "· 반드시 gradient + Korean text on image. 배경만 만들지 말 것.",
+        "· 템플릿:",
+        FINISHED_CARD_IMAGE_TEMPLATE.replace("{visual_scene}", visual_hint),
         "",
-        "【3】인스타 캡션 (한국어 2~3문장 + 출처 1줄)",
+        "【3】(선택) 배경만 — Canva 합성용. 이미지 AI 최종 업로드용 아님",
+        "· photorealistic, 4:5, no text, no chart …",
         "",
-        "【4】(선택) 캐러셀 2·3번째 장이 필요하면 각 슬라이드 카피 1줄씩",
+        "【4】인스타 캡션 (한국어 2~3문장 + 출처)",
         "",
-        "금지: DESK 브리핑 형식, ①②③, 장문 해설, 클릭베이트, 이모지 남발, 차트 캡처 배경",
+        "【5】(선택) 캐러셀 2·3장 카피",
+        "",
+        "금지: DESK·①②③·배경만을 최종물로 제출·차트 배경",
         "",
         "━━ 리드 기사 (이 이슈의 중심) ━━",
         lead_title,
