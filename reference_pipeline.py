@@ -18,14 +18,33 @@ _DISCLAIMER = (
     "※ 정리용 · 투자 권유 아님 · 레버·청산·슬리피지·거래소·규제 리스크 전제."
 )
 
-FINISHED_CARD_IMAGE_TEMPLATE = """Create a finished Instagram financial news card, 1080x1350, 4:5 vertical.
-Background: {visual_scene}. Photorealistic editorial news photo, cinematic lighting.
-Bottom 38% of the image: smooth black-to-transparent gradient overlay (must be visible).
-On top of the gradient, render LARGE bold white Korean sans-serif text, left-aligned, bottom area:
-Line 1 (bigger): 「{line1}」
-Line 2 (smaller): 「{line2}」
-The Korean text must be sharp, readable, and part of the image — not omitted.
-Style: Korean brokerage / BoA-style news card. No charts, candlesticks, logos, watermarks, English headlines."""
+FINISHED_CARD_IMAGE_TEMPLATE = """Design a professional Korean financial Instagram news card — one finished 1080×1350px image (4:5 vertical), ready to post. Style reference: Korean securities firm / Bank of America Korea Instagram card news (BoA card).
+
+═══ 1. BACKGROUND PHOTO (upper ~58%) ═══
+Scene: {visual_scene}
+Photography: Premium editorial news (Reuters / Bloomberg / Korean brokerage social team).
+Lighting: Cinematic HDR, natural contrast, subtle film grain, realistic color grading (not oversaturated, not AI-neon).
+Composition: Main subject in upper-center or upper-third; lower area visually calmer and darker for text legibility.
+Lens feel: 35mm documentary, sharp subject, optional shallow depth of field.
+Forbidden: stock charts, candlesticks, trading screens, infographics, tables, logos, watermarks, English headlines, meme style.
+
+═══ 2. BOTTOM GRADIENT (BoA-style, mandatory) ═══
+From 42% of frame height to bottom: smooth black→transparent gradient overlay.
+Bottom 25%: near-solid black (~95% opacity), fading upward with soft blend (no hard cut line).
+Photo and gradient must look professionally composited, not pasted.
+
+═══ 3. KOREAN HEADLINE (burned into image, bottom-left) ═══
+Safe zone: 48px left margin, 72px bottom margin, max 2 lines only.
+Typeface: Clean Korean Gothic sans (Noto Sans KR / Apple SD Gothic Neo style).
+Line 1 — primary (extra-bold white #FFFFFF, ~64px scale):
+「{line1}」
+Line 2 — secondary (semibold white, ~38px scale, 10–14px below line 1):
+「{line2}」
+Typography rules: left-aligned; subtle 1px soft drop shadow only; NO thick outline, NO glow, NO stroke.
+Korean glyphs must be razor-sharp and fully readable.
+
+═══ 4. OVERALL ═══
+Polished Korean Instagram financial card (증권사 카드뉴스). Neutral, authoritative, premium — not banner ad, not clickbait."""
 
 
 @dataclass
@@ -334,9 +353,10 @@ def infer_instagram_card_topic(article: Dict[str, Any]) -> tuple[str, str]:
     ).lower()
     rules: List[tuple] = [
         (
-            ("iran", "hormuz", "opec", "oil", "gas", "crude", "wti", "유가", "정유", "휘발유"),
+            ("iran", "hormuz", "opec", "oil", "gas", "crude", "wti", "유가", "정유", "휘발유", "energy"),
             "에너지·유가",
-            "Strait of Hormuz with oil tankers and refinery lights at dusk, editorial photo",
+            "offshore oil rig or Strait of Hormuz tankers at dramatic dusk, orange sky and dark sea, "
+            "refinery lights bokeh in distance, Reuters documentary framing, upper frame clear",
         ),
         (
             ("bitcoin", "btc", "crypto", "warsh", "fed chair", "fed chairman", "powell"),
@@ -407,13 +427,14 @@ def _openai_instagram_card_pack(
     desc = news_module.clean_spaces(lead_article.get("description", "") or "")[:900]
     model = (os.getenv("OPENAI_HEADLINE_MODEL") or "gpt-4o-mini").strip()
     sys = (
-        "You create Korean Instagram financial news cards (4:5). "
+        "You create Korean Instagram financial news cards (1080x1350, BoA/broker style). "
         "Output JSON only: "
         '{"line1":"...","line2":"...","caption":"...","visual_scene_en":"..."}. '
-        "line1: Korean headline max ~28 chars, comma at end when natural. "
-        "line2: Korean subline max ~55 chars. "
-        "caption: 2-3 Korean sentences for Instagram post body, neutral wire tone. "
-        "visual_scene_en: one English sentence describing photorealistic background (no chart/text). "
+        "line1: Korean hook headline max ~26 chars, wire tone, comma at end when natural, may use … "
+        "line2: Korean context max ~52 chars — impact, number, or what to watch. "
+        "caption: 2-3 Korean sentences, neutral, for Instagram post. "
+        "visual_scene_en: 2-3 English sentences — subject, lighting, camera angle, mood; "
+        "editorial photorealistic; mention upper frame clear for text; no chart/text in scene. "
         "Facts must match the article only."
     )
     user = f"TOPIC:{topic}\nQUOTES:{quotes or 'n/a'}\nTITLE:\n{title}\n\nBODY:\n{desc}\n"
@@ -431,6 +452,8 @@ def _openai_instagram_card_pack(
         l2 = str(d.get("line2") or "").strip()
         cap = str(d.get("caption") or "").strip()
         vis = str(d.get("visual_scene_en") or visual_scene_en).strip()
+        if len(vis) < 80:
+            vis = f"{vis} Cinematic editorial photo, 35mm, upper area uncluttered for headline overlay."
         if len(l1) < 4:
             return None
         if l1 and not l1.endswith((",", "，")) and len(l1) < 30:
@@ -506,11 +529,12 @@ def build_reference_telegram_prompt(
     )
 
     lines = [
-        "📱 인스타 카드뉴스",
+        "📱 인스타 카드뉴스 (증권사형 4:5)",
         "",
         "✅ 할 일",
-        "1) ChatGPT → 이미지 → 아래 「이미지 프롬프트」**전체 복사** 붙여넣기 → 생성",
-        "2) 인스타 업로드 시 아래 「캡션」붙여넣기",
+        "1) ChatGPT → 이미지 → 아래 「이미지 프롬프트」**전체 복사** 붙여넣기",
+        "2) 생성 후 한글 선명도 확인 · 흐리면 같은 프롬프트로 1회 더",
+        "3) 인스타 본문에 「캡션」붙여넣기",
         "",
         f"주제: {pack.topic}",
         "",

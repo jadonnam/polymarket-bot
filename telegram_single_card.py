@@ -70,14 +70,13 @@ def _try_openai_korean_card_lines(article: Dict[str, Any]) -> Optional[Tuple[str
     model = (os.getenv("OPENAI_HEADLINE_MODEL") or "gpt-4o-mini").strip()
     client = OpenAI(api_key=(os.getenv("OPENAI_API_KEY") or "").strip())
     sys = (
-        "You write Korean headlines for a vertical news card (Instagram/Telegram). "
-        "Style: concise neutral market news like Korean wire services. "
+        "You write Korean headlines for a 1080x1350 Instagram financial news card (BoA/broker style). "
+        "Style: concise neutral wire — Korean securities Instagram card news. "
         "No emoji, no clickbait, no exclamation. "
         'Output JSON only: {"line1":"...","line2":"..."}. '
-        "line1 = main headline (한글, max ~28 chars). End with comma when natural (예: 뱅크오브아메리카,). "
-        "line2 = supporting line (한글, max ~55 chars). No period on line1 if comma used. "
-        "Keep tickers and proper nouns in Latin when natural (NVDA, Fed, CPI). "
-        "If the input title is already Korean, polish lightly without changing facts."
+        "line1 = hook headline (한글, max ~26 chars). Comma at end when natural. May use …. "
+        "line2 = context/impact (한글, max ~52 chars). "
+        "Keep tickers in Latin when natural (NVDA, Fed). Facts unchanged."
     )
     user = f"TITLE:\n{title}\n\nLEAD:\n{desc}\n"
     try:
