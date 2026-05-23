@@ -117,7 +117,7 @@ def selected_pipeline_name() -> str:
             return "telegram_single_card"
         if TELEGRAM_SEND_DESK_BRIEFING:
             return "desk_briefing"
-        return "reference_prompt_only"
+        return "instagram_card_prompt_only"
     if STATIC_REEL_MODE:
         return "disabled_static_reel"
     if CARD_NEWS_MODE:
@@ -717,7 +717,7 @@ def _send_reference_telegram(
     articles: List[Dict[str, Any]],
     lead_article: Dict[str, Any],
 ) -> bool:
-    """이슈 기사 통과 후 레퍼런스 생성 프롬프트만 텔레그램 전송 (OpenAI 호출 없음)."""
+    """이슈 필터 통과 후 인스타 카드뉴스 생성 프롬프트만 텔레그램 전송."""
     if not ENABLE_TELEGRAM_STORAGE:
         return False
     send_fn = send_storage_message or send_storage_text
@@ -763,7 +763,7 @@ def _send_reference_telegram(
             return sent_any
     if sent_any:
         print(
-            f"[telegram_storage_send] reference prompt ok "
+            f"[telegram_storage_send] instagram card prompt ok "
             f"chunks={len(chunks)} articles={n_arts} "
             f"lead={news_module.clean_spaces(lead_article.get('title', '') or '')[:60]!r}"
         )
@@ -1213,7 +1213,7 @@ def main() -> None:
                     allow_send = True
 
                 if allow_send:
-                    print("[reference_pipeline] 이슈 필터 통과 → 생성 프롬프트만 전송")
+                    print("[reference_pipeline] 이슈 필터 통과 → 인스타 카드뉴스 프롬프트만 전송")
                     arts = (
                         cached_arts
                         if cached_arts is not None

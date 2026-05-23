@@ -1,6 +1,6 @@
 """
-레퍼런스(자돈남 DESK + BoA 카드) 생성용 프롬프트 조립.
-텔레그램에는 프롬프트만 전송(서버 OpenAI 호출 없음).
+인스타 카드뉴스(4:5) 생성용 프롬프트 조립.
+텔레그램에는 카드 제작 프롬프트만 전송(서버 OpenAI 호출 없음).
 """
 from __future__ import annotations
 
@@ -18,45 +18,30 @@ _DISCLAIMER = (
     "※ 정리용 · 투자 권유 아님 · 레버·청산·슬리피지·거래소·규제 리스크 전제."
 )
 
-# 사용자 레퍼런스 — 출력 형식은 이것과 동일 구조
-REFERENCE_DESK_EXAMPLE = """자돈남 DESK · 🇰🇷 한국 · 5/17(일) · 21:47 KST
-〔10/10〕
+# 대한민국 인스타 금융·시사 카드뉴스 레퍼런스 (BoA/증권사형 4:5)
+REFERENCE_INSTAGRAM_CARD = """[비주얼]
+· 캔버스 1080×1350 (4:5 세로), 인스타 피드 1장
+· 상단~중앙: 주제에 맞는 실사 배경(인물·현장·산업). 캔들·차트 캡처·표 스크린샷 금지
+· 하단 35~40%: 검정→투명 그라데이션
+· 하단 흰색 굵은 한글 2줄만 (그 외 UI·로고·워터마크 없음)
 
-① 헤드
-· '검은 금요일' 이어 美도 내리막 … 韓 증시 '단기 조정'일까, '폭락 전조'일까
-· '검은 금요일' 이어 美도 내리막
-· 韓 증시 '단기 조정'일까, '폭락 전조'일까 美국채 ‘고금리 발작’
-· 짐 싸는 외국인, 코스피 8000 발목 잡을까 '팔천피' 안착 재도전
+[카피 톤]
+· 한국 금융 인스타 카드뉴스: 짧고 단정, 과장·이모지·속보 느낌 금지
+· 美 韓 日·티커는 필요할 때만
+· 1줄: 주체·핵심 (끝에 쉼표 자연스러우면 쉼표)
+· 2줄: 맥락·영향 한 문장
 
-② 해석
-· 美 반도체 급락은 월요인 코스피 갭·외국인·삼성·하닉 선물 포지션부터 확인.
-
-③ 볼 것
-· 한국장: 코스피·환율·외국인 + NQ·SOX·삼성·하닉 갭·선물 동시."""
-
-REFERENCE_CARD_EXAMPLE = """카드 이미지(인스타 4:5) 하단 큰 흰 글씨 2줄만:
+[예시]
 뱅크오브아메리카,
-반도체 다음은 소재주가 시장을 이끌 것"""
+반도체 다음은 소재주가 시장을 이끌 것
 
-SYSTEM_PROMPT = f"""You are the editor of 「자돈남 DESK」 Korean market Telegram.
+이란 전쟁 여파,
+美 휴일 앞 휘발유 4년 만에 최고"""
 
-Your job: read English/Korean news inputs and output JSON for (1) DESK message body sections and (2) card image two lines.
+# desk_briefing 경로용 (텔레그램 프롬프트 전송과 별개)
+_DESK_REF = """① 헤드 · ② 해석 · ③ 볼 것 — 한국어 데스크 노트."""
 
-STRICT RULES:
-- ALL user-facing text in Korean (한국어). No English sentences in bullets.
-- Tone: concise wire / desk note. Use 美 韓 日 欧 where natural.
-- Match the REFERENCE layout exactly (section titles ① 헤드 ② 해석 ③ 볼 것, bullets start with ·).
-- head_lead can use … between clauses like the reference.
-- head_bullets: 3–4 items; first bullet may be the long combined headline.
-- interpretation / watch: each ONE line, no bullet prefix in JSON (added in code).
-- card_line1: short subject + comma at end when natural (max ~28 chars).
-- card_line2: supporting line (max ~55 chars).
-
-REFERENCE DESK:
-{REFERENCE_DESK_EXAMPLE}
-
-REFERENCE CARD:
-{REFERENCE_CARD_EXAMPLE}
+SYSTEM_PROMPT = f"""You are a Korean market editor.
 
 Output JSON only:
 {{
@@ -66,7 +51,11 @@ Output JSON only:
   "head_bullets": ["...", "..."],
   "interpretation": "...",
   "watch": "..."
-}}"""
+}}
+
+Card lines: Korean Instagram 4:5 card style (max ~28 / ~55 chars).
+{_DESK_REF}
+"""
 
 
 @dataclass
@@ -337,93 +326,129 @@ def collect_articles_for_prompt(
     return out
 
 
+def infer_instagram_card_topic(article: Dict[str, Any]) -> tuple[str, str]:
+    """주제 라벨 + 배경 연출 힌트 (한국 인스타 카드뉴스용)."""
+    blob = " ".join(
+        [
+            news_module.clean_spaces(article.get("title", "") or ""),
+            news_module.clean_spaces(article.get("description", "") or ""),
+        ]
+    ).lower()
+    rules: List[tuple] = [
+        (
+            ("iran", "hormuz", "opec", "oil", "gas", "crude", "wti", "유가", "정유", "휘발유"),
+            "에너지·유가",
+            "중동 정유·유조선·주유소·호르무즈 해역 실사, 차트 금지",
+        ),
+        (
+            ("fed", "cpi", "rate", "yield", "bond", "금리", "국채", "인플레"),
+            "금리·매크로",
+            "연준·국채·금리 발표 현장, 뉴욕 금융가 실사",
+        ),
+        (
+            ("nvidia", "semiconductor", "ai", "chip", "반도체", "삼성", "하이닉스"),
+            "반도체·AI",
+            "팹·웨이퍼·데이터센터·실리콘 밸리 실사, 녹색 차트 금지",
+        ),
+        (
+            ("kospi", "kosdaq", "코스피", "코스닥", "외국인", "증시", "stock market"),
+            "한국 증시",
+            "여의도·거래소 전경·증권가 실사, 지수 차트 캡처 금지",
+        ),
+        (
+            ("dollar", "won", "fx", "환율", "원달러"),
+            "환율",
+            "달러·원화·외환 거래 연상 실사",
+        ),
+        (
+            ("bitcoin", "btc", "crypto", "비트"),
+            "가상자산",
+            "비트코인·거래소 연상, 가격 차트 스크린샷 금지",
+        ),
+        (
+            ("war", "military", "missile", "전쟁", "공습", "휴전"),
+            "지정학",
+            "전쟁·외교 현장 실사, 과도한 폭력 묘사 자제",
+        ),
+        (
+            ("trump", "biden", "white house", "대통령", "관세"),
+            "정치·정책",
+            "백악관·국회·관세·무역 연상 실사",
+        ),
+    ]
+    for keys, label, visual in rules:
+        if any(k in blob for k in keys):
+            return label, visual
+    return "글로벌 시장", "뉴스 주제에 맞는 산업·현장 실사, 차트·표 캡처 금지"
+
+
 def build_reference_telegram_prompt(
     articles: List[Dict[str, Any]],
     *,
     lead_article: Dict[str, Any],
     market_data: Optional[Dict[str, Any]] = None,
 ) -> str:
-    """
-    텔레그램용 — ChatGPT/Claude에 붙여넣기 좋은 한국어 생성 지시문.
-    (=== SYSTEM === / JSON 스키마 / 영어 시스템 프롬프트 없음)
-    """
+    """텔레그램용 — 인스타 카드뉴스(4:5) 제작 프롬프트만 (한국형, 주제 맞춤)."""
     md = market_data if isinstance(market_data, dict) else {}
-    arts = collect_articles_for_prompt(articles, lead_article, max_items=10)
-    dt = now_kst()
-    wd = _WEEKDAY_KO[dt.weekday()]
-    header_line = (
-        f"자돈남 DESK · 🇰🇷 한국 · {dt.month}/{dt.day}({wd}) · "
-        f"{dt.hour:02d}:{dt.minute:02d} KST\n〔10/10〕"
-    )
+    arts = collect_articles_for_prompt(articles, lead_article, max_items=8)
 
     lead_title = news_module.clean_spaces(lead_article.get("title", "") or "")
-    lead_desc = news_module.clean_spaces(lead_article.get("description", "") or "")[:400]
+    lead_desc = news_module.clean_spaces(lead_article.get("description", "") or "")[:500]
     lead_url = str(lead_article.get("url") or "").strip()
     lead_src = news_module.article_source_name(lead_article)
 
-    quotes = _quotes_block(md) or "시세 수집 중"
-    related = " · ".join(_related_tags(md, arts))
-
+    topic, visual_hint = infer_instagram_card_topic(lead_article)
+    quotes = _quotes_block(md)
     related_count = max(0, len(arts) - 1)
     related_block = _news_block(arts[1:] if len(arts) > 1 else [])
     if not related_block.strip():
-        related_block = "(동일 이슈 추가 기사 없음 — 리드만 반영)"
+        related_block = "(추가 기사 없음 — 리드 기사만 반영)"
 
     lines = [
-        "📋 자돈남 DESK · 생성 지시 (아래 그대로 복사해 AI에 붙여넣기)",
+        "📱 인스타 카드뉴스 · 생성 프롬프트 (복사 → AI/이미지툴에 붙여넣기)",
         "",
-        "역할: 한국 시장 데스크 에디터.",
-        "아래 「리드 기사」「관련 뉴스」「시장」만 보고, 레퍼런스와 **동일한 형식·톤**으로 완성본을 작성한다.",
+        f"주제 분류: {topic}",
+        f"배경 연출: {visual_hint}",
         "",
-        "규칙:",
-        "· 전부 한국어(영어 문장 금지). 美 韓 日 欧 자연스럽게.",
-        "· 불릿은 반드시 · 로 시작.",
-        "· 출력은 (1) DESK 텔레그램 완성본 (2) 카드 하단 2줄 — 두 블록만. 설명·JSON 금지.",
+        "역할: 대한민국 금융·시사 인스타 **카드형 뉴스** 제작자.",
+        "아래 기사만 보고, 주제에 맞는 **4:5 카드 1장**용 결과만 출력한다.",
         "",
-        "━━ 레퍼런스 DESK ━━",
-        REFERENCE_DESK_EXAMPLE.strip(),
+        "━━ 대한민국 인스타 카드뉴스 규격 ━━",
+        REFERENCE_INSTAGRAM_CARD.strip(),
         "",
-        "━━ 레퍼런스 카드(4:5 하단 흰 글씨 2줄) ━━",
-        REFERENCE_CARD_EXAMPLE.strip(),
+        "━━ AI에게 요청할 출력 (이 순서만, 설명·JSON 금지) ━━",
         "",
-        "━━ 작성할 출력 형식 ━━",
-        header_line,
+        "【1】카드 하단 한글 2줄",
+        "1줄: (최대 28자, 쉼표 가능)",
+        "2줄: (최대 55자)",
         "",
-        "① 헤드",
-        "· (메인 헤드 1줄 + 서브 3~4줄)",
+        "【2】배경 이미지 생성 프롬프트 (영문 1문단)",
+        "· photorealistic, editorial news photo, 4:5 vertical",
+        "· 주제와 일치하는 장면, 텍스트·워터마크·차트 없음",
+        "· negative: chart, candlestick, screenshot, infographic, logo, text overlay",
         "",
-        "② 해석",
-        "· (한국장 관점 1줄)",
+        "【3】인스타 캡션 (한국어 2~3문장 + 출처 1줄)",
         "",
-        "③ 볼 것",
-        "· (오늘 체크리스트 1줄)",
+        "【4】(선택) 캐러셀 2·3번째 장이 필요하면 각 슬라이드 카피 1줄씩",
+        "",
+        "금지: DESK 브리핑 형식, ①②③, 장문 해설, 클릭베이트, 이모지 남발, 차트 캡처 배경",
+        "",
+        "━━ 리드 기사 (이 이슈의 중심) ━━",
+        lead_title,
+        lead_desc,
     ]
-    if lead_url:
-        lines.append(f"🔗 {lead_url}")
-    if lead_src:
-        lines.append(f"출처: {lead_src}")
-    if related:
-        lines.append(f"관련: {related}")
+    if lead_src or lead_url:
+        lines.append(f"출처: {lead_src}" + (f" · {lead_url}" if lead_url else ""))
     lines.extend(
         [
-            _DISCLAIMER,
             "",
-            "【카드 2줄】",
-            "1줄: (주체, 끝에 쉼표)",
-            "2줄: (부연)",
-            "",
-            "━━ 리드 기사 ━━",
-            lead_title,
-            lead_desc,
-            f"출처: {lead_src}" + (f" · {lead_url}" if lead_url else ""),
-            "",
-            f"━━ 관련 뉴스 ({related_count}건) ━━",
+            f"━━ 참고 뉴스 ({related_count}건) ━━",
             related_block,
-            "",
-            "━━ 시장 스냅샷 ━━",
-            quotes,
         ]
     )
+    if quotes:
+        lines.extend(["", "━━ 참고 시세 (카피에 숫자 넣을 때만) ━━", quotes])
+    lines.extend(["", _DISCLAIMER])
     return "\n".join(lines).strip()
 
 
