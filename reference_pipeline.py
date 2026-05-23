@@ -275,6 +275,7 @@ def apply_pack_to_article(
         a["_ko_line1"] = sanitize_card_korean(pack.line1)
         a["_ko_line2"] = sanitize_card_korean(pack.line2)
         a["_instagram_caption"] = pack.caption
+        a["_card_topic"] = pack.topic
     else:
         a["_ko_line1"] = sanitize_card_korean(pack.card_line1)
         a["_ko_line2"] = sanitize_card_korean(pack.card_line2)
@@ -453,8 +454,8 @@ def _openai_instagram_card_pack(
         "You create Korean Instagram financial news cards (1080x1350, BoA/broker style). "
         "Output JSON only: "
         '{"line1":"...","line2":"...","caption":"...","visual_scene_en":"..."}. '
-        "line1: Korean hook headline max ~26 chars, wire tone, comma at end when natural, may use … "
-        "line2: Korean context max ~52 chars — news impact only, NOT a list of index %% unless article is about indices. "
+        "line1: Korean hook headline max ~24 chars — strong, scroll-stopping, comma at end when natural. "
+        "line2: Korean punch line max ~48 chars — why it matters now, not index laundry list. "
         "Spell indices correctly: 코스피 (never 코스파), 코스닥. "
         "caption: 2-3 Korean sentences, neutral, for Instagram post. "
         "visual_scene_en: 2-3 English sentences — subject, lighting, camera angle, mood; "

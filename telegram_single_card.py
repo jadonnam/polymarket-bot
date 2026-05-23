@@ -29,10 +29,11 @@ W, H = 1080, 1350
 PAD_X = 48
 BOTTOM_ZONE = 620
 # BoA/삼성형 레퍼런스 (1080×1350) — assets/card_references/ref_photo_bank.png 기준
-BOA_H1_PX = 64
-BOA_H2_PX = 38
-BOA_BOTTOM_MARGIN = 72
-BOA_GRADIENT_START = 0.42
+BOA_H1_PX = 78
+BOA_H2_PX = 48
+BOA_BOTTOM_MARGIN = 56
+BOA_GRADIENT_START = 0.36
+CARD_IMPACT_STYLE = (os.getenv("CARD_IMPACT_STYLE") or "true").lower() == "true"
 CARD_PHOTO_SHOW_SOURCE = (os.getenv("CARD_PHOTO_SHOW_SOURCE") or "false").lower() == "true"
 # NewsAPI urlToImage — 차트·무관 썸네일이 많아 기본 off. photo(BoA형)는 env와 무관하게 항상 폴백만.
 TELEGRAM_CARD_USE_NEWS_IMAGE = (os.getenv("TELEGRAM_CARD_USE_NEWS_IMAGE") or "false").lower() == "true"
@@ -409,17 +410,89 @@ def _open_fallback_cover(path: str, tw: int, th: int) -> Optional[Image.Image]:
 
 
 def _apply_photo_bottom_gradient(img: Image.Image) -> None:
-    """BoA 레퍼런스: 하단 42%부터 부드러운 검정 그라데이션(외곽선 텍스트 대신)."""
+    """하단 그라데이션 — 카드뉴스 가독용(IMPACT 시 더 진하게)."""
     overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
     d = ImageDraw.Draw(overlay)
     y0 = int(img.height * BOA_GRADIENT_START)
     span = max(img.height - y0 - 1, 1)
+    power = 1.2 if CARD_IMPACT_STYLE else 1.35
+    max_a = 252 if CARD_IMPACT_STYLE else 245
     for y in range(y0, img.height):
         t = (y - y0) / span
-        # 하단으로 갈수록 진하게; 상단은 거의 투명
-        alpha = int(8 + 245 * (t**1.35))
-        d.line([(0, y), (img.width, y)], fill=(0, 0, 0, min(alpha, 252)))
+        alpha = int(12 + max_a * (t**power))
+        d.line([(0, y), (img.width, y)], fill=(0, 0, 0, min(alpha, 255)))
+    if CARD_IMPACT_STYLE:
+        # 좌우 비네트 — 시선을 하단 헤드라인으로
+        vig = Image.new("RGBA", img.size, (0, 0, 0, 0))
+        vd = ImageDraw.Draw(vig)
+        for x in range(img.width):
+            t = min(x, img.width - 1 - x) / max(img.width * 0.22, 1)
+            t = max(0.0, min(1.0, t))
+            a = int(55 * (1.0 - t))
+            if a > 0:
+                vd.line([(x, 0), (x, img.height)], fill=(0, 0, 0, a))
+        overlay = Image.alpha_composite(overlay, vig)
     img.alpha_composite(overlay)
+
+
+def _topic_chip_style(topic: str) -> Tuple[Tuple[int, int, int, int], Tuple[int, int, int, int], str]:
+    t = (topic or "").strip()
+    if "유가" in t or "에너지" in t:
+        return (200, 55, 35, 235), (255, 255, 255, 255), "유가"
+    if "연준" in t or "금리" in t or "비트" in t:
+        return (28, 78, 168, 235), (255, 255, 255, 255), "연준"
+    if "반도체" in t or "AI" in t:
+        return (72, 52, 168, 235), (255, 255, 255, 255), "반도체"
+    if "증시" in t or "코스" in t:
+        return (18, 120, 95, 235), (255, 255, 255, 255), "증시"
+    if "환율" in t:
+        return (160, 110, 20, 235), (255, 255, 255, 255), "환율"
+    if "지정학" in t or "정치" in t:
+        return (120, 50, 50, 235), (255, 255, 255, 255), "이슈"
+    return (40, 40, 48, 220), (255, 230, 160, 255), "시장"
+
+
+def _draw_topic_chip(draw: Any, topic: str, *, x: int = PAD_X, y: int = 44) -> int:
+    """상단 주제 칩 — 반환: 칩 하단 y."""
+    if not CARD_IMPACT_STYLE or not topic:
+        return y
+    bg, fg, short = _topic_chip_style(topic)
+    label = short if len(short) <= 6 else short[:6]
+    f = _load_font_bold(26)
+    try:
+        bbox = draw.textbbox((0, 0), label, font=f)
+        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    except Exception:
+        tw, th = draw.textsize(label, font=f)  # type: ignore[attr-defined]
+    pad_x, pad_y = 18, 10
+    rx2 = x + tw + pad_x * 2
+    ry2 = y + th + pad_y * 2
+    try:
+        draw.rounded_rectangle(
+            [x, y, rx2, ry2], radius=14, fill=bg
+        )
+    except Exception:
+        draw.rectangle([x, y, rx2, ry2], fill=bg)
+    draw.text((x + pad_x, y + pad_y - 2), label, font=f, fill=fg)
+    return ry2 + 12
+
+
+def _draw_text_impact(
+    draw: Any,
+    xy: Tuple[int, int],
+    text: str,
+    font: Any,
+    *,
+    fill: Tuple[int, int, int, int] = (255, 255, 255, 255),
+    accent: bool = False,
+) -> None:
+    """굵은 그림자 + 선택 시 골드 톤 헤드라인."""
+    x, y = xy
+    if accent:
+        fill = (255, 218, 120, 255)
+    for dx, dy, a in ((0, 3, 140), (2, 2, 90), (0, 0, 255)):
+        draw.text((x + dx, y + dy), text, font=font, fill=(0, 0, 0, a))
+    draw.text((x, y), text, font=font, fill=fill)
 
 
 def _draw_text_photo(
@@ -777,22 +850,30 @@ def _render_template_photo(article: Dict[str, Any], out_path: str) -> str:
     _composite_watermark(rgba)
     draw = ImageDraw.Draw(rgba)
 
+    card_topic = str(article.get("_card_topic") or "").strip()
+    _draw_topic_chip(draw, card_topic)
     top_left = (os.getenv("CARD_TOP_LEFT_LABEL") or "").strip()
     brand = (os.getenv("CARD_BRAND_LABEL") or "").strip()
-    if top_left:
+    if top_left and not card_topic:
         f_tl = _load_font_regular(22)
         _draw_text_photo(draw, (PAD_X, 40), top_left, f_tl)
-    elif brand:
+    elif brand and not card_topic:
         f_tl = _load_font_regular(22)
         _draw_text_photo(draw, (PAD_X, 40), brand, f_tl)
 
-    max_text_w = W - 2 * PAD_X
+    max_text_w = W - 2 * PAD_X - (10 if CARD_IMPACT_STYLE else 0)
+    text_x = PAD_X + (14 if CARD_IMPACT_STYLE else 0)
     line1, line2 = _boa_photo_headline_lines(article, title, subtitle)
 
-    h1s = BOA_H1_PX if len(line1) <= 24 else max(52, BOA_H1_PX - 6)
-    h2s = BOA_H2_PX if len(line2) <= 40 else max(32, BOA_H2_PX - 4)
+    if len(line1) <= 18:
+        h1s = BOA_H1_PX
+    elif len(line1) <= 26:
+        h1s = max(68, BOA_H1_PX - 8)
+    else:
+        h1s = max(58, BOA_H1_PX - 16)
+    h2s = BOA_H2_PX if len(line2) <= 38 else max(40, BOA_H2_PX - 6)
     f_h1 = _load_font_bold(h1s)
-    f_h2 = _load_font_regular(h2s)
+    f_h2 = _load_font_bold(h2s) if CARD_IMPACT_STYLE else _load_font_regular(h2s)
     h1_lines = _wrap_lines(draw, line1, f_h1, max_text_w)[:2]
     if not h1_lines and line1:
         h1_lines = [line1[:100]]
@@ -805,19 +886,38 @@ def _render_template_photo(article: Dict[str, Any], out_path: str) -> str:
             "nixpacks fonts-noto-cjk 또는 assets/fonts/ 에 폰트 필요"
         )
 
-    lh1 = max(int(h1s * 1.18), 34)
-    lh2 = max(int(h2s * 1.22), 28)
-    gap = 14
+    lh1 = max(int(h1s * 1.14), 40)
+    lh2 = max(int(h2s * 1.16), 32)
+    gap = 16
     block_h = len(h1_lines) * lh1 + len(h2_lines) * lh2 + gap
     if CARD_PHOTO_SHOW_SOURCE:
         block_h += 28
     y = H - BOA_BOTTOM_MARGIN - block_h
 
+    if CARD_IMPACT_STYLE and (h1_lines or h2_lines):
+        bar_h = block_h - gap + 8
+        _accent = (255, 196, 64, 255)
+        draw.rectangle(
+            [text_x - 12, int(y) - 4, text_x - 4, int(y) + bar_h],
+            fill=_accent,
+        )
+
+    draw_headline = _draw_text_impact if CARD_IMPACT_STYLE else _draw_text_photo
     for ln in h1_lines:
-        _draw_text_photo(draw, (PAD_X, int(y)), ln, f_h1)
+        draw_headline(draw, (text_x, int(y)), ln, f_h1, accent=CARD_IMPACT_STYLE)
         y += lh1
     for ln in h2_lines:
-        _draw_text_photo(draw, (PAD_X, int(y)), ln, f_h2, fill=(248, 250, 255, 255))
+        if CARD_IMPACT_STYLE:
+            _draw_text_impact(
+                draw,
+                (text_x, int(y)),
+                ln,
+                f_h2,
+                fill=(245, 248, 255, 255),
+                accent=False,
+            )
+        else:
+            _draw_text_photo(draw, (text_x, int(y)), ln, f_h2, fill=(248, 250, 255, 255))
         y += lh2
 
     if CARD_PHOTO_SHOW_SOURCE:
