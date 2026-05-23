@@ -726,6 +726,7 @@ def _send_reference_telegram(
 
     from reference_pipeline import (
         build_reference_telegram_prompt,
+        collect_articles_for_prompt,
         split_telegram_prompt_chunks,
     )
 
@@ -735,11 +736,22 @@ def _send_reference_telegram(
         print(f"[reference_pipeline] market_data failed: {repr(e)}")
         market_data = {}
 
+    pool = list(articles or [])
+    if len(pool) < 8:
+        extra = fetch_news_articles(hours_back=36, limit=40)
+        seen = {news_module.dedup_key(a) for a in pool if news_module.dedup_key(a)}
+        for a in extra:
+            k = news_module.dedup_key(a)
+            if k and k not in seen:
+                seen.add(k)
+                pool.append(a)
+
     prompt = build_reference_telegram_prompt(
-        articles,
+        pool,
         lead_article=lead_article,
         market_data=market_data,
     )
+    n_arts = len(collect_articles_for_prompt(pool, lead_article, max_items=10))
     chunks = split_telegram_prompt_chunks(prompt)
     sent_any = False
     for i, chunk in enumerate(chunks):
@@ -752,7 +764,8 @@ def _send_reference_telegram(
     if sent_any:
         print(
             f"[telegram_storage_send] reference prompt ok "
-            f"chunks={len(chunks)} lead={news_module.clean_spaces(lead_article.get('title', '') or '')[:60]!r}"
+            f"chunks={len(chunks)} articles={n_arts} "
+            f"lead={news_module.clean_spaces(lead_article.get('title', '') or '')[:60]!r}"
         )
     return sent_any
 

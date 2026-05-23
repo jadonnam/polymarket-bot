@@ -108,16 +108,34 @@ def _news_block(articles: List[Dict[str, Any]]) -> str:
     return "\n".join(lines) or "(no articles)"
 
 
+_QUOTE_LABELS = {
+    "KOSPI": "코스피",
+    "KOSDAQ": "코스닥",
+    "NQ_FUT": "나스닥선물",
+    "WTI": "WTI유",
+    "USDKRW": "원·달러",
+    "US10Y": "美10년국채",
+    "BTC": "비트코인",
+    "GOLD": "금",
+}
+
+
 def _quotes_block(market_data: Dict[str, Any]) -> str:
     q = (market_data or {}).get("quotes", {})
     if not isinstance(q, dict):
         return ""
     parts: List[str] = []
-    for sym in ("KOSPI", "KOSDAQ", "NQ_FUT", "WTI", "USDKRW", "US10Y"):
+    for sym in ("KOSPI", "KOSDAQ", "NQ_FUT", "WTI", "USDKRW", "US10Y", "BTC", "GOLD"):
         row = q.get(sym, {})
-        if isinstance(row, dict) and row.get("chg_pct") is not None:
-            parts.append(f"{sym} {row.get('chg_pct')}%")
-    return ", ".join(parts)
+        if not isinstance(row, dict):
+            continue
+        chg = row.get("chg_pct")
+        if chg is None:
+            continue
+        label = _QUOTE_LABELS.get(sym, sym)
+        sign = "+" if float(chg) > 0 else ""
+        parts.append(f"{label} {sign}{chg}%")
+    return " · ".join(parts)
 
 
 def _related_tags(market_data: Dict[str, Any], articles: List[Dict[str, Any]]) -> List[str]:
@@ -280,30 +298,43 @@ def get_system_prompt_for_debug() -> str:
     return SYSTEM_PROMPT
 
 
-def build_reference_user_prompt(
+def collect_articles_for_prompt(
     articles: List[Dict[str, Any]],
-    *,
     lead_article: Dict[str, Any],
-    market_data: Optional[Dict[str, Any]] = None,
-) -> str:
-    md = market_data if isinstance(market_data, dict) else {}
-    arts = list(articles or [])
-    if lead_article and lead_article not in arts:
-        arts = [lead_article] + arts
-    lead_title = news_module.clean_spaces(lead_article.get("title", "") or "")
-    lead_url = str(lead_article.get("url") or "").strip()
-    lead_src = news_module.article_source_name(lead_article)
-    lead_block = f"{lead_title}\n출처: {lead_src}"
-    if lead_url:
-        lead_block += f"\nURL: {lead_url}"
-    return (
-        "LEAD ARTICLE:\n"
-        + lead_block
-        + "\n\nALL NEWS:\n"
-        + _news_block(arts)
-        + "\n\nMARKET:\n"
-        + (_quotes_block(md) or "(없음)")
-    )
+    *,
+    max_items: int = 10,
+) -> List[Dict[str, Any]]:
+    """리드 + 풀에서 점수 상위 기사를 묶어 프롬프트 입력을 풍부하게."""
+    seen: set[str] = set()
+    out: List[Dict[str, Any]] = []
+
+    def _add(a: Optional[Dict[str, Any]]) -> None:
+        if not a or len(out) >= max_items:
+            return
+        k = news_module.dedup_key(a)
+        if not k or k in seen:
+            return
+        seen.add(k)
+        out.append(a)
+
+    _add(lead_article)
+    pool = list(articles or [])
+    scored: List[tuple] = []
+    for a in pool:
+        k = news_module.dedup_key(a)
+        if not k or k in seen:
+            continue
+        try:
+            sc = float(news_module.score_article(a))
+        except Exception:
+            sc = 0.0
+        scored.append((sc, a))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    for _, a in scored:
+        _add(a)
+        if len(out) >= max_items:
+            break
+    return out
 
 
 def build_reference_telegram_prompt(
@@ -312,16 +343,88 @@ def build_reference_telegram_prompt(
     lead_article: Dict[str, Any],
     market_data: Optional[Dict[str, Any]] = None,
 ) -> str:
-    """레퍼런스대로 생성할 때 쓰는 전체 프롬프트(system + user)."""
-    user = build_reference_user_prompt(
-        articles, lead_article=lead_article, market_data=market_data
+    """
+    텔레그램용 — ChatGPT/Claude에 붙여넣기 좋은 한국어 생성 지시문.
+    (=== SYSTEM === / JSON 스키마 / 영어 시스템 프롬프트 없음)
+    """
+    md = market_data if isinstance(market_data, dict) else {}
+    arts = collect_articles_for_prompt(articles, lead_article, max_items=10)
+    dt = now_kst()
+    wd = _WEEKDAY_KO[dt.weekday()]
+    header_line = (
+        f"자돈남 DESK · 🇰🇷 한국 · {dt.month}/{dt.day}({wd}) · "
+        f"{dt.hour:02d}:{dt.minute:02d} KST\n〔10/10〕"
     )
-    return (
-        "=== SYSTEM ===\n"
-        + SYSTEM_PROMPT.strip()
-        + "\n\n=== USER ===\n"
-        + user.strip()
+
+    lead_title = news_module.clean_spaces(lead_article.get("title", "") or "")
+    lead_desc = news_module.clean_spaces(lead_article.get("description", "") or "")[:400]
+    lead_url = str(lead_article.get("url") or "").strip()
+    lead_src = news_module.article_source_name(lead_article)
+
+    quotes = _quotes_block(md) or "시세 수집 중"
+    related = " · ".join(_related_tags(md, arts))
+
+    related_count = max(0, len(arts) - 1)
+    related_block = _news_block(arts[1:] if len(arts) > 1 else [])
+    if not related_block.strip():
+        related_block = "(동일 이슈 추가 기사 없음 — 리드만 반영)"
+
+    lines = [
+        "📋 자돈남 DESK · 생성 지시 (아래 그대로 복사해 AI에 붙여넣기)",
+        "",
+        "역할: 한국 시장 데스크 에디터.",
+        "아래 「리드 기사」「관련 뉴스」「시장」만 보고, 레퍼런스와 **동일한 형식·톤**으로 완성본을 작성한다.",
+        "",
+        "규칙:",
+        "· 전부 한국어(영어 문장 금지). 美 韓 日 欧 자연스럽게.",
+        "· 불릿은 반드시 · 로 시작.",
+        "· 출력은 (1) DESK 텔레그램 완성본 (2) 카드 하단 2줄 — 두 블록만. 설명·JSON 금지.",
+        "",
+        "━━ 레퍼런스 DESK ━━",
+        REFERENCE_DESK_EXAMPLE.strip(),
+        "",
+        "━━ 레퍼런스 카드(4:5 하단 흰 글씨 2줄) ━━",
+        REFERENCE_CARD_EXAMPLE.strip(),
+        "",
+        "━━ 작성할 출력 형식 ━━",
+        header_line,
+        "",
+        "① 헤드",
+        "· (메인 헤드 1줄 + 서브 3~4줄)",
+        "",
+        "② 해석",
+        "· (한국장 관점 1줄)",
+        "",
+        "③ 볼 것",
+        "· (오늘 체크리스트 1줄)",
+    ]
+    if lead_url:
+        lines.append(f"🔗 {lead_url}")
+    if lead_src:
+        lines.append(f"출처: {lead_src}")
+    if related:
+        lines.append(f"관련: {related}")
+    lines.extend(
+        [
+            _DISCLAIMER,
+            "",
+            "【카드 2줄】",
+            "1줄: (주체, 끝에 쉼표)",
+            "2줄: (부연)",
+            "",
+            "━━ 리드 기사 ━━",
+            lead_title,
+            lead_desc,
+            f"출처: {lead_src}" + (f" · {lead_url}" if lead_url else ""),
+            "",
+            f"━━ 관련 뉴스 ({related_count}건) ━━",
+            related_block,
+            "",
+            "━━ 시장 스냅샷 ━━",
+            quotes,
+        ]
     )
+    return "\n".join(lines).strip()
 
 
 def split_telegram_prompt_chunks(text: str, limit: int = 4090) -> List[str]:
