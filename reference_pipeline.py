@@ -1,6 +1,6 @@
 """
-인스타 카드뉴스(4:5) 생성용 프롬프트 조립.
-텔레그램에는 카드 제작 프롬프트만 전송(서버 OpenAI 호출 없음).
+인스타 카드뉴스(4:5) — 이슈 기사 → OpenAI 카피 → 텔레그램에
+「이미지 AI에 바로 붙여넣을 완성 프롬프트」+ 인스타 캡션 전송.
 """
 from __future__ import annotations
 
@@ -18,21 +18,6 @@ _DISCLAIMER = (
     "※ 정리용 · 투자 권유 아님 · 레버·청산·슬리피지·거래소·규제 리스크 전제."
 )
 
-# 대한민국 인스타 금융·시사 카드뉴스 레퍼런스 (BoA/증권사형 4:5)
-REFERENCE_INSTAGRAM_CARD = """[완성 카드 = 배경 + 그라데이션 + 한글 2줄이 한 장에 있어야 함]
-· 1080×1350 (4:5). 상단~중앙: 주제 실사 배경. 차트·캔들·표 캡처 금지
-· 하단 35~40%: 검정→투명 그라데이션(반드시 합성)
-· 그라데이션 위: 흰색 굵은 한글 2줄, 좌측 정렬, 크게(1줄 > 2줄)
-· 로고·워터마크·영문 헤드라인 본문 없음
-
-[카피]
-뱅크오브아메리카,
-반도체 다음은 소재주가 시장을 이끌 것
-
-[잘못된 결과]
-배경 사진만 있고 한글·그라데이션이 없음 → 실패. 【2】완성 프롬프트 사용."""
-
-# ChatGPT·DALL·E 등 이미지 AI용 원샷 템플릿 (【1】 확정 후 【1】 문구를 그대로 넣음)
 FINISHED_CARD_IMAGE_TEMPLATE = """Create a finished Instagram financial news card, 1080x1350, 4:5 vertical.
 Background: {visual_scene}. Photorealistic editorial news photo, cinematic lighting.
 Bottom 38% of the image: smooth black-to-transparent gradient overlay (must be visible).
@@ -41,6 +26,15 @@ Line 1 (bigger): 「{line1}」
 Line 2 (smaller): 「{line2}」
 The Korean text must be sharp, readable, and part of the image — not omitted.
 Style: Korean brokerage / BoA-style news card. No charts, candlesticks, logos, watermarks, English headlines."""
+
+
+@dataclass
+class InstagramCardPack:
+    line1: str
+    line2: str
+    caption: str
+    topic: str
+    visual_scene_en: str
 
 # desk_briefing 경로용 (텔레그램 프롬프트 전송과 별개)
 _DESK_REF = """① 헤드 · ② 해석 · ③ 볼 것 — 한국어 데스크 노트."""
@@ -331,7 +325,7 @@ def collect_articles_for_prompt(
 
 
 def infer_instagram_card_topic(article: Dict[str, Any]) -> tuple[str, str]:
-    """주제 라벨 + 배경 연출 힌트 (한국 인스타 카드뉴스용)."""
+    """주제 라벨(한국어) + 배경 장면(영문, 이미지 AI용)."""
     blob = " ".join(
         [
             news_module.clean_spaces(article.get("title", "") or ""),
@@ -342,48 +336,157 @@ def infer_instagram_card_topic(article: Dict[str, Any]) -> tuple[str, str]:
         (
             ("iran", "hormuz", "opec", "oil", "gas", "crude", "wti", "유가", "정유", "휘발유"),
             "에너지·유가",
-            "중동 정유·유조선·주유소·호르무즈 해역 실사, 차트 금지",
+            "Strait of Hormuz with oil tankers and refinery lights at dusk, editorial photo",
         ),
         (
-            ("fed", "cpi", "rate", "yield", "bond", "금리", "국채", "인플레"),
+            ("bitcoin", "btc", "crypto", "warsh", "fed chair", "fed chairman", "powell"),
+            "연준·비트코인",
+            "White House ceremony or Federal Reserve building with subtle Bitcoin motif, no price chart",
+        ),
+        (
+            ("fed", "cpi", "rate", "yield", "bond", "금리", "국채", "인플레", "treasury"),
             "금리·매크로",
-            "연준·국채·금리 발표 현장, 뉴욕 금융가 실사",
+            "Federal Reserve press conference or US Treasury bond trading floor, Wall Street",
         ),
         (
             ("nvidia", "semiconductor", "ai", "chip", "반도체", "삼성", "하이닉스"),
             "반도체·AI",
-            "팹·웨이퍼·데이터센터·실리콘 밸리 실사, 녹색 차트 금지",
+            "semiconductor fab cleanroom or Silicon Valley tech campus, editorial photo",
         ),
         (
             ("kospi", "kosdaq", "코스피", "코스닥", "외국인", "증시", "stock market"),
             "한국 증시",
-            "여의도·거래소 전경·증권가 실사, 지수 차트 캡처 금지",
+            "Seoul financial district and Korea Exchange exterior, no index chart screenshot",
         ),
         (
             ("dollar", "won", "fx", "환율", "원달러"),
             "환율",
-            "달러·원화·외환 거래 연상 실사",
-        ),
-        (
-            ("bitcoin", "btc", "crypto", "비트"),
-            "가상자산",
-            "비트코인·거래소 연상, 가격 차트 스크린샷 금지",
+            "currency exchange trading desk, US dollar and Korean won imagery",
         ),
         (
             ("war", "military", "missile", "전쟁", "공습", "휴전"),
             "지정학",
-            "전쟁·외교 현장 실사, 과도한 폭력 묘사 자제",
+            "diplomatic summit or geopolitical news scene, restrained tone",
         ),
         (
-            ("trump", "biden", "white house", "대통령", "관세"),
+            ("trump", "biden", "white house", "대통령", "관세", "tariff"),
             "정치·정책",
-            "백악관·국회·관세·무역 연상 실사",
+            "White House or US Capitol policy briefing scene",
         ),
     ]
-    for keys, label, visual in rules:
+    for keys, label, visual_en in rules:
         if any(k in blob for k in keys):
-            return label, visual
-    return "글로벌 시장", "뉴스 주제에 맞는 산업·현장 실사, 차트·표 캡처 금지"
+            return label, visual_en
+    return "글로벌 시장", "global financial markets editorial scene, photorealistic, no charts"
+
+
+def build_finished_card_image_prompt(line1: str, line2: str, visual_scene_en: str) -> str:
+    return FINISHED_CARD_IMAGE_TEMPLATE.format(
+        visual_scene=visual_scene_en.strip(),
+        line1=line1.strip(),
+        line2=line2.strip(),
+    )
+
+
+def _openai_instagram_card_pack(
+    lead_article: Dict[str, Any],
+    *,
+    topic: str,
+    visual_scene_en: str,
+    quotes: str,
+) -> Optional[InstagramCardPack]:
+    key = (os.getenv("OPENAI_API_KEY") or "").strip()
+    if not key:
+        return None
+    try:
+        from openai import OpenAI
+    except Exception:
+        return None
+
+    title = news_module.clean_spaces(lead_article.get("title", "") or "")
+    desc = news_module.clean_spaces(lead_article.get("description", "") or "")[:900]
+    model = (os.getenv("OPENAI_HEADLINE_MODEL") or "gpt-4o-mini").strip()
+    sys = (
+        "You create Korean Instagram financial news cards (4:5). "
+        "Output JSON only: "
+        '{"line1":"...","line2":"...","caption":"...","visual_scene_en":"..."}. '
+        "line1: Korean headline max ~28 chars, comma at end when natural. "
+        "line2: Korean subline max ~55 chars. "
+        "caption: 2-3 Korean sentences for Instagram post body, neutral wire tone. "
+        "visual_scene_en: one English sentence describing photorealistic background (no chart/text). "
+        "Facts must match the article only."
+    )
+    user = f"TOPIC:{topic}\nQUOTES:{quotes or 'n/a'}\nTITLE:\n{title}\n\nBODY:\n{desc}\n"
+    try:
+        client = OpenAI(api_key=key)
+        r = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "system", "content": sys}, {"role": "user", "content": user}],
+            response_format={"type": "json_object"},
+            temperature=0.25,
+            max_tokens=420,
+        )
+        d = json.loads((r.choices[0].message.content or "").strip())
+        l1 = str(d.get("line1") or "").strip()
+        l2 = str(d.get("line2") or "").strip()
+        cap = str(d.get("caption") or "").strip()
+        vis = str(d.get("visual_scene_en") or visual_scene_en).strip()
+        if len(l1) < 4:
+            return None
+        if l1 and not l1.endswith((",", "，")) and len(l1) < 30:
+            l1 = l1 + ","
+        print("[reference_pipeline] openai instagram card pack ok")
+        return InstagramCardPack(
+            line1=l1[:90],
+            line2=l2[:140],
+            caption=cap[:600] or l2,
+            topic=topic,
+            visual_scene_en=vis[:300],
+        )
+    except Exception as e:
+        print(f"[reference_pipeline] openai card pack failed: {repr(e)}")
+        return None
+
+
+def generate_instagram_card_pack(
+    lead_article: Dict[str, Any],
+    *,
+    market_data: Optional[Dict[str, Any]] = None,
+) -> InstagramCardPack:
+    topic, visual_en = infer_instagram_card_topic(lead_article)
+    quotes = _quotes_block(market_data or {})
+
+    pack = _openai_instagram_card_pack(
+        lead_article, topic=topic, visual_scene_en=visual_en, quotes=quotes
+    )
+    if pack:
+        return pack
+
+    try:
+        from telegram_single_card import _try_openai_korean_card_lines
+
+        ko = _try_openai_korean_card_lines(lead_article)
+    except Exception:
+        ko = None
+
+    if ko:
+        l1, l2 = ko
+        return InstagramCardPack(
+            line1=l1,
+            line2=l2,
+            caption=l2,
+            topic=topic,
+            visual_scene_en=visual_en,
+        )
+
+    title = news_module.clean_spaces(lead_article.get("title", "") or "")[:80]
+    return InstagramCardPack(
+        line1="시장 변수 점검,",
+        line2=title or "글로벌 뉴스 흐름 확인",
+        caption="관련 뉴스에 따르면 시장 변수를 점검할 필요가 있습니다.",
+        topic=topic,
+        visual_scene_en=visual_en,
+    )
 
 
 def build_reference_telegram_prompt(
@@ -392,72 +495,43 @@ def build_reference_telegram_prompt(
     lead_article: Dict[str, Any],
     market_data: Optional[Dict[str, Any]] = None,
 ) -> str:
-    """텔레그램용 — 인스타 카드뉴스(4:5) 제작 프롬프트만 (한국형, 주제 맞춤)."""
+    """텔레그램 — 바로 쓸 완성 이미지 프롬프트 + 인스타 캡션 (할 일 2단계)."""
     md = market_data if isinstance(market_data, dict) else {}
-    arts = collect_articles_for_prompt(articles, lead_article, max_items=8)
+    pack = generate_instagram_card_pack(lead_article, market_data=md)
 
-    lead_title = news_module.clean_spaces(lead_article.get("title", "") or "")
-    lead_desc = news_module.clean_spaces(lead_article.get("description", "") or "")[:500]
     lead_url = str(lead_article.get("url") or "").strip()
     lead_src = news_module.article_source_name(lead_article)
-
-    topic, visual_hint = infer_instagram_card_topic(lead_article)
-    quotes = _quotes_block(md)
-    related_count = max(0, len(arts) - 1)
-    related_block = _news_block(arts[1:] if len(arts) > 1 else [])
-    if not related_block.strip():
-        related_block = "(추가 기사 없음 — 리드 기사만 반영)"
+    image_prompt = build_finished_card_image_prompt(
+        pack.line1, pack.line2, pack.visual_scene_en
+    )
 
     lines = [
-        "📱 인스타 카드뉴스 · 생성 프롬프트",
+        "📱 인스타 카드뉴스",
         "",
-        "⚠️ ChatGPT 이미지/DALL·E에 넣을 때",
-        "· 【2】완성(원샷)만 사용 → 한글 2줄+그라데이션 포함된 **완성 카드**",
-        "· 【3】배경만은 Canva·피그마 합성용. 이걸로 생성하면 글자 없는 사진만 나옴(지금 겪은 현상)",
+        "✅ 할 일",
+        "1) ChatGPT → 이미지 → 아래 「이미지 프롬프트」**전체 복사** 붙여넣기 → 생성",
+        "2) 인스타 업로드 시 아래 「캡션」붙여넣기",
         "",
-        f"주제: {topic} · 배경 연출: {visual_hint}",
+        f"주제: {pack.topic}",
         "",
-        "역할: 한국 금융 인스타 카드뉴스. 아래 기사 → 출력 【1】~【4】만.",
+        "━━ 카드 한글 (이미지에 들어갈 글) ━━",
+        pack.line1,
+        pack.line2,
         "",
-        "━━ 규격 ━━",
-        REFERENCE_INSTAGRAM_CARD.strip(),
+        "━━━━ 이미지 프롬프트 (복사) ━━━━",
+        image_prompt,
+        "━━━━━━━━━━━━━━━━━━━━",
         "",
-        "━━ 출력 순서 (설명·JSON 금지) ━━",
-        "",
-        "【1】카드 하단 한글 2줄 (확정 카피)",
-        "1줄:",
-        "2줄:",
-        "",
-        "【2】★ 완성 카드 이미지 프롬프트 (영문, ChatGPT 이미지에 이것만 붙여넣기)",
-        "· 【1】의 1·2줄을 아래 템플릿 {line1} {line2}에 **한글 그대로** 넣을 것",
-        "· 반드시 gradient + Korean text on image. 배경만 만들지 말 것.",
-        "· 템플릿:",
-        FINISHED_CARD_IMAGE_TEMPLATE.replace("{visual_scene}", visual_hint),
-        "",
-        "【3】(선택) 배경만 — Canva 합성용. 이미지 AI 최종 업로드용 아님",
-        "· photorealistic, 4:5, no text, no chart …",
-        "",
-        "【4】인스타 캡션 (한국어 2~3문장 + 출처)",
-        "",
-        "【5】(선택) 캐러셀 2·3장 카피",
-        "",
-        "금지: DESK·①②③·배경만을 최종물로 제출·차트 배경",
-        "",
-        "━━ 리드 기사 (이 이슈의 중심) ━━",
-        lead_title,
-        lead_desc,
+        "━━ 캡션 (인스타 본문) ━━",
+        pack.caption,
     ]
-    if lead_src or lead_url:
-        lines.append(f"출처: {lead_src}" + (f" · {lead_url}" if lead_url else ""))
-    lines.extend(
-        [
-            "",
-            f"━━ 참고 뉴스 ({related_count}건) ━━",
-            related_block,
-        ]
-    )
+    if lead_src:
+        lines.append(f"출처: {lead_src}")
+    if lead_url:
+        lines.append(lead_url)
+    quotes = _quotes_block(md)
     if quotes:
-        lines.extend(["", "━━ 참고 시세 (카피에 숫자 넣을 때만) ━━", quotes])
+        lines.extend(["", f"참고 시세: {quotes}"])
     lines.extend(["", _DISCLAIMER])
     return "\n".join(lines).strip()
 
