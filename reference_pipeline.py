@@ -251,10 +251,33 @@ def _fallback_pack(
     )
 
 
-def apply_pack_to_article(article: Dict[str, Any], pack: ReferencePack) -> Dict[str, Any]:
+def sanitize_card_korean(text: str) -> str:
+    """이미지 AI·LLM 흔한 오타 보정 (코스파→코스피 등)."""
+    t = str(text or "").strip()
+    if not t:
+        return t
+    fixes = (
+        ("코스파", "코스피"),
+        ("코스피피", "코스피"),
+        ("코스닥", "코스닥"),
+        ("나스닥크", "나스닥"),
+    )
+    for bad, good in fixes:
+        t = t.replace(bad, good)
+    return t
+
+
+def apply_pack_to_article(
+    article: Dict[str, Any], pack: Any
+) -> Dict[str, Any]:
     a = dict(article)
-    a["_ko_line1"] = pack.card_line1
-    a["_ko_line2"] = pack.card_line2
+    if isinstance(pack, InstagramCardPack):
+        a["_ko_line1"] = sanitize_card_korean(pack.line1)
+        a["_ko_line2"] = sanitize_card_korean(pack.line2)
+        a["_instagram_caption"] = pack.caption
+    else:
+        a["_ko_line1"] = sanitize_card_korean(pack.card_line1)
+        a["_ko_line2"] = sanitize_card_korean(pack.card_line2)
     return a
 
 
@@ -431,7 +454,8 @@ def _openai_instagram_card_pack(
         "Output JSON only: "
         '{"line1":"...","line2":"...","caption":"...","visual_scene_en":"..."}. '
         "line1: Korean hook headline max ~26 chars, wire tone, comma at end when natural, may use … "
-        "line2: Korean context max ~52 chars — impact, number, or what to watch. "
+        "line2: Korean context max ~52 chars — news impact only, NOT a list of index %% unless article is about indices. "
+        "Spell indices correctly: 코스피 (never 코스파), 코스닥. "
         "caption: 2-3 Korean sentences, neutral, for Instagram post. "
         "visual_scene_en: 2-3 English sentences — subject, lighting, camera angle, mood; "
         "editorial photorealistic; mention upper frame clear for text; no chart/text in scene. "
@@ -460,9 +484,9 @@ def _openai_instagram_card_pack(
             l1 = l1 + ","
         print("[reference_pipeline] openai instagram card pack ok")
         return InstagramCardPack(
-            line1=l1[:90],
-            line2=l2[:140],
-            caption=cap[:600] or l2,
+            line1=sanitize_card_korean(l1[:90]),
+            line2=sanitize_card_korean(l2[:140]),
+            caption=sanitize_card_korean(cap[:600] or l2),
             topic=topic,
             visual_scene_en=vis[:300],
         )
@@ -495,9 +519,9 @@ def generate_instagram_card_pack(
     if ko:
         l1, l2 = ko
         return InstagramCardPack(
-            line1=l1,
-            line2=l2,
-            caption=l2,
+            line1=sanitize_card_korean(l1),
+            line2=sanitize_card_korean(l2),
+            caption=sanitize_card_korean(l2),
             topic=topic,
             visual_scene_en=visual_en,
         )
@@ -505,11 +529,34 @@ def generate_instagram_card_pack(
     title = news_module.clean_spaces(lead_article.get("title", "") or "")[:80]
     return InstagramCardPack(
         line1="시장 변수 점검,",
-        line2=title or "글로벌 뉴스 흐름 확인",
+        line2=sanitize_card_korean(title or "글로벌 뉴스 흐름 확인"),
         caption="관련 뉴스에 따르면 시장 변수를 점검할 필요가 있습니다.",
         topic=topic,
         visual_scene_en=visual_en,
     )
+
+
+def build_instagram_caption_message(
+    pack: InstagramCardPack,
+    lead_article: Dict[str, Any],
+) -> str:
+    """인스타 본문용 짧은 텔레그램 메시지 (이미지와 함께)."""
+    lead_url = str(lead_article.get("url") or "").strip()
+    lead_src = news_module.article_source_name(lead_article)
+    lines = [
+        "📱 인스타 카드뉴스 · 업로드용",
+        "",
+        pack.caption,
+        "",
+        f"1줄: {pack.line1}",
+        f"2줄: {pack.line2}",
+    ]
+    if lead_src:
+        lines.append(f"출처: {lead_src}")
+    if lead_url:
+        lines.append(lead_url)
+    lines.extend(["", _DISCLAIMER])
+    return "\n".join(lines).strip()
 
 
 def build_reference_telegram_prompt(

@@ -81,9 +81,11 @@ REEL_AUTOMATION_ENABLED = (os.getenv("REEL_AUTOMATION_ENABLED") or "false").lowe
 ENABLE_OPENAI_CARD_IMAGE = (os.getenv("ENABLE_OPENAI_CARD_IMAGE") or "false").lower() == "true"
 FORCE_CARD_TEST = (os.getenv("FORCE_CARD_TEST") or "false").lower() == "true"
 TEXT_BRIEFING_ONLY = (os.getenv("TEXT_BRIEFING_ONLY") or "true").lower() == "true"
-# 기본: 이슈 필터 통과 후 레퍼런스 생성 프롬프트만 텔레그램 전송 (DESK/카드/서버 OpenAI 없음)
+# 기본: 이슈 통과 → BoA형 카드 JPEG 합성 후 텔레그램 (ChatGPT 이미지 생성 불필요)
 TELEGRAM_SEND_DESK_BRIEFING = (os.getenv("TELEGRAM_SEND_DESK_BRIEFING") or "false").lower() == "true"
-TELEGRAM_SINGLE_CARD = (os.getenv("TELEGRAM_SINGLE_CARD") or "false").lower() == "true"
+TELEGRAM_SINGLE_CARD = (os.getenv("TELEGRAM_SINGLE_CARD") or "true").lower() == "true"
+# render=서버 JPEG | prompt=이미지 AI용 긴 프롬프트만
+TELEGRAM_CARD_DELIVERY = (os.getenv("TELEGRAM_CARD_DELIVERY") or "render").strip().lower()
 # 인스타 자동 업로드는 사용하지 않음 (수동 게시만). 코드에 남아 있어도 호출하지 않음.
 NEWS_API_KEY_SET = bool((os.getenv("NEWS_API_KEY") or "").strip())
 OFF_SCHEDULE_ISSUE_ENABLED = (os.getenv("OFF_SCHEDULE_ISSUE_ENABLED") or "true").lower() == "true"
@@ -117,6 +119,8 @@ def selected_pipeline_name() -> str:
             return "telegram_single_card"
         if TELEGRAM_SEND_DESK_BRIEFING:
             return "desk_briefing"
+        if TELEGRAM_SINGLE_CARD and TELEGRAM_CARD_DELIVERY == "render":
+            return "instagram_card_render"
         return "instagram_card_prompt_only"
     if STATIC_REEL_MODE:
         return "disabled_static_reel"
@@ -717,16 +721,18 @@ def _send_reference_telegram(
     articles: List[Dict[str, Any]],
     lead_article: Dict[str, Any],
 ) -> bool:
-    """이슈 필터 통과 후 인스타 카드뉴스 생성 프롬프트만 텔레그램 전송."""
+    """이슈 필터 통과 → 인스타 카드 JPEG(기본) 또는 이미지 AI 프롬프트."""
     if not ENABLE_TELEGRAM_STORAGE:
         return False
     send_fn = send_storage_message or send_storage_text
-    if send_fn is None:
+    if send_fn is None and send_storage_image is None:
         return False
 
     from reference_pipeline import (
+        apply_pack_to_article,
+        build_instagram_caption_message,
         build_reference_telegram_prompt,
-        collect_articles_for_prompt,
+        generate_instagram_card_pack,
         split_telegram_prompt_chunks,
     )
 
@@ -746,15 +752,48 @@ def _send_reference_telegram(
                 seen.add(k)
                 pool.append(a)
 
-    prompt = build_reference_telegram_prompt(
-        pool,
-        lead_article=lead_article,
-        market_data=market_data,
-    )
-    n_arts = len(collect_articles_for_prompt(pool, lead_article, max_items=10))
-    chunks = split_telegram_prompt_chunks(prompt)
+    pack = generate_instagram_card_pack(lead_article, market_data=market_data)
+    use_render = TELEGRAM_SINGLE_CARD and TELEGRAM_CARD_DELIVERY == "render"
     sent_any = False
-    for i, chunk in enumerate(chunks):
+
+    if use_render:
+        from telegram_single_card import build_telegram_caption, run_telegram_single_card
+
+        picked = apply_pack_to_article(lead_article, pack)
+        card_path, _picked = run_telegram_single_card(
+            articles=pool,
+            out_dir=TELEGRAM_CARD_OUT_DIR,
+            lead_article=picked,
+        )
+        if card_path and send_storage_image is not None:
+            try:
+                send_storage_image(card_path, build_telegram_caption(picked))
+                print("[telegram_storage_send] instagram card jpeg ok")
+                sent_any = True
+            except Exception as e:
+                print(f"[reference_pipeline] card image send failed: {repr(e)}")
+        else:
+            print(
+                "[reference_pipeline] card render skipped (font/Pillow) — "
+                "fallback to prompt text"
+            )
+
+    if sent_any and send_fn:
+        try:
+            send_fn(build_instagram_caption_message(pack, lead_article))
+        except Exception as e:
+            print(f"[reference_pipeline] caption send failed: {repr(e)}")
+
+    if sent_any:
+        return True
+
+    if not send_fn:
+        return False
+
+    prompt = build_reference_telegram_prompt(
+        pool, lead_article=lead_article, market_data=market_data
+    )
+    for i, chunk in enumerate(split_telegram_prompt_chunks(prompt)):
         try:
             send_fn(chunk)
             sent_any = True
@@ -762,11 +801,7 @@ def _send_reference_telegram(
             print(f"[reference_pipeline] prompt chunk {i + 1} failed: {repr(e)}")
             return sent_any
     if sent_any:
-        print(
-            f"[telegram_storage_send] instagram card prompt ok "
-            f"chunks={len(chunks)} articles={n_arts} "
-            f"lead={news_module.clean_spaces(lead_article.get('title', '') or '')[:60]!r}"
-        )
+        print("[telegram_storage_send] instagram card prompt fallback ok")
     return sent_any
 
 
@@ -1213,7 +1248,10 @@ def main() -> None:
                     allow_send = True
 
                 if allow_send:
-                    print("[reference_pipeline] 이슈 필터 통과 → 인스타 카드뉴스 프롬프트만 전송")
+                    print(
+                        "[reference_pipeline] 이슈 필터 통과 → 인스타 카드 "
+                        f"delivery={TELEGRAM_CARD_DELIVERY}"
+                    )
                     arts = (
                         cached_arts
                         if cached_arts is not None
