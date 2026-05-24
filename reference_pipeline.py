@@ -455,7 +455,9 @@ def _openai_instagram_card_pack(
         "Output JSON only: "
         '{"line1":"...","line2":"...","caption":"...","visual_scene_en":"..."}. '
         "line1: Korean hook headline max ~24 chars — strong, scroll-stopping, comma at end when natural. "
+        "For assassination/shooting/breaking: urgent but factual (속보 톤). "
         "line2: Korean punch line max ~48 chars — why it matters now, not index laundry list. "
+        "Spell 코스피 never 코스파. "
         "Spell indices correctly: 코스피 (never 코스파), 코스닥. "
         "caption: 2-3 Korean sentences, neutral, for Instagram post. "
         "visual_scene_en: 2-3 English sentences — subject, lighting, camera angle, mood; "
@@ -537,27 +539,64 @@ def generate_instagram_card_pack(
     )
 
 
-def build_instagram_caption_message(
+def build_instagram_hashtags(
     pack: InstagramCardPack,
     lead_article: Dict[str, Any],
+    *,
+    max_tags: int = 4,
 ) -> str:
-    """인스타 본문용 짧은 텔레그램 메시지 (이미지와 함께)."""
+    """인스타 해시태그 4개 이하."""
+    blob = " ".join(
+        [
+            pack.topic,
+            pack.line1,
+            pack.line2,
+            news_module.clean_spaces(lead_article.get("title", "") or ""),
+        ]
+    ).lower()
+    tags: List[str] = []
+    rules = [
+        (("trump", "트럼프", "총격", "assassination", "shooting"), "#트럼프"),
+        (("iran", "이란", "hormuz", "oil", "유가", "wti"), "#유가"),
+        (("fed", "연준", "금리", "cpi"), "#연준"),
+        (("bitcoin", "btc", "비트"), "#비트코인"),
+        (("war", "전쟁", "attack", "지정학"), "#국제정세"),
+        (("kospi", "코스피", "증시", "stock"), "#코스피"),
+        (("semiconductor", "반도체", "nvidia"), "#반도체"),
+    ]
+    for keys, tag in rules:
+        if any(k in blob for k in keys) and tag not in tags:
+            tags.append(tag)
+    if not tags:
+        tags.append("#시장이슈")
+    if "#속보" not in tags and news_module.is_viral_breaking(lead_article):
+        tags.insert(0, "#속보")
+    return " ".join(tags[:max_tags])
+
+
+def build_telegram_delivery_messages(
+    pack: InstagramCardPack,
+    *,
+    lead_article: Dict[str, Any],
+    market_data: Optional[Dict[str, Any]] = None,
+) -> List[str]:
+    """텔레그램 2통: ① 이미지 프롬프트 ② 캡션+해시태그."""
+    _ = market_data
     lead_url = str(lead_article.get("url") or "").strip()
     lead_src = news_module.article_source_name(lead_article)
-    lines = [
-        "📱 인스타 카드뉴스 · 업로드용",
-        "",
-        pack.caption,
-        "",
-        f"1줄: {pack.line1}",
-        f"2줄: {pack.line2}",
-    ]
+    image_prompt = build_finished_card_image_prompt(
+        pack.line1, pack.line2, pack.visual_scene_en
+    )
+    cap_lines = [pack.caption.strip(), "", build_instagram_hashtags(pack, lead_article)]
     if lead_src:
-        lines.append(f"출처: {lead_src}")
+        cap_lines.extend(["", f"출처: {lead_src}"])
     if lead_url:
-        lines.append(lead_url)
-    lines.extend(["", _DISCLAIMER])
-    return "\n".join(lines).strip()
+        cap_lines.append(lead_url)
+    cap_lines.extend(["", _DISCLAIMER])
+    return [
+        image_prompt.strip(),
+        "\n".join(cap_lines).strip(),
+    ]
 
 
 def build_reference_telegram_prompt(
@@ -566,46 +605,11 @@ def build_reference_telegram_prompt(
     lead_article: Dict[str, Any],
     market_data: Optional[Dict[str, Any]] = None,
 ) -> str:
-    """텔레그램 — 바로 쓸 완성 이미지 프롬프트 + 인스타 캡션 (할 일 2단계)."""
-    md = market_data if isinstance(market_data, dict) else {}
-    pack = generate_instagram_card_pack(lead_article, market_data=md)
-
-    lead_url = str(lead_article.get("url") or "").strip()
-    lead_src = news_module.article_source_name(lead_article)
-    image_prompt = build_finished_card_image_prompt(
-        pack.line1, pack.line2, pack.visual_scene_en
+    """레거시 — 한 메시지로 합침 (권장: build_telegram_delivery_messages)."""
+    pack = generate_instagram_card_pack(lead_article, market_data=market_data)
+    return "\n\n---\n\n".join(
+        build_telegram_delivery_messages(pack, lead_article=lead_article, market_data=market_data)
     )
-
-    lines = [
-        "📱 인스타 카드뉴스 (증권사형 4:5)",
-        "",
-        "✅ 할 일",
-        "1) ChatGPT → 이미지 → 아래 「이미지 프롬프트」**전체 복사** 붙여넣기",
-        "2) 생성 후 한글 선명도 확인 · 흐리면 같은 프롬프트로 1회 더",
-        "3) 인스타 본문에 「캡션」붙여넣기",
-        "",
-        f"주제: {pack.topic}",
-        "",
-        "━━ 카드 한글 (이미지에 들어갈 글) ━━",
-        pack.line1,
-        pack.line2,
-        "",
-        "━━━━ 이미지 프롬프트 (복사) ━━━━",
-        image_prompt,
-        "━━━━━━━━━━━━━━━━━━━━",
-        "",
-        "━━ 캡션 (인스타 본문) ━━",
-        pack.caption,
-    ]
-    if lead_src:
-        lines.append(f"출처: {lead_src}")
-    if lead_url:
-        lines.append(lead_url)
-    quotes = _quotes_block(md)
-    if quotes:
-        lines.extend(["", f"참고 시세: {quotes}"])
-    lines.extend(["", _DISCLAIMER])
-    return "\n".join(lines).strip()
 
 
 def split_telegram_prompt_chunks(text: str, limit: int = 4090) -> List[str]:

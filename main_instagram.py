@@ -81,11 +81,11 @@ REEL_AUTOMATION_ENABLED = (os.getenv("REEL_AUTOMATION_ENABLED") or "false").lowe
 ENABLE_OPENAI_CARD_IMAGE = (os.getenv("ENABLE_OPENAI_CARD_IMAGE") or "false").lower() == "true"
 FORCE_CARD_TEST = (os.getenv("FORCE_CARD_TEST") or "false").lower() == "true"
 TEXT_BRIEFING_ONLY = (os.getenv("TEXT_BRIEFING_ONLY") or "true").lower() == "true"
-# 기본: 이슈 통과 → BoA형 카드 JPEG 합성 후 텔레그램 (ChatGPT 이미지 생성 불필요)
+# 기본: 이슈 통과 → 이미지 AI 프롬프트 + 캡션(해시태그)만 텔레그램
 TELEGRAM_SEND_DESK_BRIEFING = (os.getenv("TELEGRAM_SEND_DESK_BRIEFING") or "false").lower() == "true"
-TELEGRAM_SINGLE_CARD = (os.getenv("TELEGRAM_SINGLE_CARD") or "true").lower() == "true"
-# render=서버 JPEG | prompt=이미지 AI용 긴 프롬프트만
-TELEGRAM_CARD_DELIVERY = (os.getenv("TELEGRAM_CARD_DELIVERY") or "render").strip().lower()
+TELEGRAM_SINGLE_CARD = (os.getenv("TELEGRAM_SINGLE_CARD") or "false").lower() == "true"
+# prompt=프롬프트+캡션 | render=서버 JPEG
+TELEGRAM_CARD_DELIVERY = (os.getenv("TELEGRAM_CARD_DELIVERY") or "prompt").strip().lower()
 # 인스타 자동 업로드는 사용하지 않음 (수동 게시만). 코드에 남아 있어도 호출하지 않음.
 NEWS_API_KEY_SET = bool((os.getenv("NEWS_API_KEY") or "").strip())
 OFF_SCHEDULE_ISSUE_ENABLED = (os.getenv("OFF_SCHEDULE_ISSUE_ENABLED") or "true").lower() == "true"
@@ -299,7 +299,9 @@ def record_telegram_card_sent(article: Optional[Dict[str, Any]], off_schedule: b
 
 
 def should_allow_off_schedule_issue(score: int, article: Dict[str, Any]) -> bool:
-    if score < OFF_SCHEDULE_MIN_SCORE:
+    if news_module.is_viral_breaking(article):
+        print("[off_schedule_issue] viral/breaking 속보 — 점수 문턱 완화")
+    elif score < OFF_SCHEDULE_MIN_SCORE:
         return False
     key = _telegram_card_dedup_key(article)
     now = now_kst()
@@ -518,7 +520,7 @@ def _news_score(article: Dict[str, Any]) -> int:
 
 def fetch_news_articles(hours_back: int = 36, limit: int = 40) -> List[Dict[str, Any]]:
     try:
-        return news_module.fetch_news(limit=limit, hours_back=hours_back) or []
+        return news_module.fetch_news_for_cards(limit=limit, hours_back=hours_back) or []
     except TypeError:
         try:
             return news_module.fetch_news() or []
@@ -730,10 +732,8 @@ def _send_reference_telegram(
 
     from reference_pipeline import (
         apply_pack_to_article,
-        build_instagram_caption_message,
-        build_reference_telegram_prompt,
+        build_telegram_delivery_messages,
         generate_instagram_card_pack,
-        split_telegram_prompt_chunks,
     )
 
     try:
@@ -790,18 +790,19 @@ def _send_reference_telegram(
     if not send_fn:
         return False
 
-    prompt = build_reference_telegram_prompt(
-        pool, lead_article=lead_article, market_data=market_data
-    )
-    for i, chunk in enumerate(split_telegram_prompt_chunks(prompt)):
+    for i, msg in enumerate(
+        build_telegram_delivery_messages(
+            pack, lead_article=lead_article, market_data=market_data
+        )
+    ):
         try:
-            send_fn(chunk)
+            send_fn(msg)
             sent_any = True
         except Exception as e:
-            print(f"[reference_pipeline] prompt chunk {i + 1} failed: {repr(e)}")
+            print(f"[reference_pipeline] delivery msg {i + 1} failed: {repr(e)}")
             return sent_any
     if sent_any:
-        print("[telegram_storage_send] instagram card prompt fallback ok")
+        print("[telegram_storage_send] prompt + caption ok")
     return sent_any
 
 

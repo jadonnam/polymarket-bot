@@ -704,7 +704,8 @@ def best_single_card_candidate_relaxed(
         if not url.lower().startswith("https://"):
             continue
         title = news_module.clean_spaces(a.get("title", ""))
-        if len(title) < 18:
+        min_len = 12 if news_module.is_viral_breaking(a) else 18
+        if len(title) < min_len:
             continue
         s = news_module.score_article(a)
         if s > best_s:
@@ -744,7 +745,8 @@ def best_single_card_candidate(
         if not url.lower().startswith("https://"):
             continue
         title = news_module.clean_spaces(a.get("title", ""))
-        if len(title) < 18:
+        min_len = 12 if news_module.is_viral_breaking(a) else 18
+        if len(title) < min_len:
             continue
         s = news_module.score_article(a)
         if s > best_s:

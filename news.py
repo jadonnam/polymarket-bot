@@ -20,6 +20,12 @@ SEARCH_QUERY = (
     'OR "iran" OR "israel" OR "ceasefire" OR "war" OR "hormuz" OR "dollar" OR "fx" '
     'OR "KRW" OR "korean won" OR "won/dollar" OR "dollar/won")'
 )
+# 속보·테러·총격 등 — 메인 쿼리에 안 잡히면 별도 호출로 앞에 합침
+VIRAL_SEARCH_QUERY = (
+    '("trump" AND ("shot" OR "shooting" OR "assassination" OR "gunman" OR "attack" OR "wounded"))'
+    ' OR ("breaking" AND ("assassination" OR "shooting" OR "shot"))'
+    ' OR ("president" AND ("shot" OR "shooting" OR "assassination"))'
+)
 
 TRUSTED_DOMAINS = {
     "reuters.com", "bloomberg.com", "cnbc.com", "wsj.com", "ft.com",
@@ -92,6 +98,22 @@ BREAKING_KEYWORDS = [
     "slump", "crash", "default", "bankruptcy", "sanction", "hormuz",
     "iran", "israel", "war",
 ]
+VIRAL_BREAKING_MARKERS = (
+    "assassination",
+    "assassination attempt",
+    "shot",
+    "shooting",
+    "gunman",
+    "gunfire",
+    "opened fire",
+    "wounded",
+    "killed",
+    "attempt on his life",
+    "attempt on life",
+    "총격",
+    "피격",
+    "assassinate",
+)
 
 
 def _now_utc() -> datetime:
@@ -290,6 +312,8 @@ def is_low_quality_text(article: Dict[str, Any]) -> bool:
     title = clean_spaces(article.get("title", ""))
     desc = clean_spaces(article.get("description", "") or article.get("content", "") or "")
     text = f"{title} {desc}".lower()
+    if is_viral_breaking(article) and len(title) >= 12:
+        return any(p in text for p in LOW_QUALITY_PATTERNS)
     if len(title) < 18 or len(desc) < 40:
         return True
     if any(p in text for p in LOW_QUALITY_PATTERNS):
@@ -337,13 +361,48 @@ def is_press_release_wire(article: Dict[str, Any]) -> bool:
     return any(n in title_l or n in blob for n in needles)
 
 
+def is_viral_breaking(article: Dict[str, Any]) -> bool:
+    """트럼프 총격·암살 시도 등 — 카드뉴스 우선."""
+    if not trusted_article(article):
+        return False
+    text = article_text(article).lower()
+    title = clean_spaces(article.get("title", "")).lower()
+    if any(m in text or m in title for m in VIRAL_BREAKING_MARKERS):
+        if any(
+            k in text or k in title
+            for k in (
+                "trump",
+                "president",
+                "white house",
+                "fed",
+                "iran",
+                "war",
+                "oil",
+                "market",
+                "bitcoin",
+            )
+        ):
+            return True
+        if "trump" in text or "trump" in title:
+            return True
+        if any(m in title for m in ("assassination", "shooting", "shot", "gunman")):
+            return True
+    if "breaking" in title and any(
+        k in title for k in ("trump", "shot", "shooting", "assassination", "attack")
+    ):
+        return True
+    return False
+
+
 def is_breaking_candidate(article: Dict[str, Any]) -> bool:
+    if is_viral_breaking(article):
+        return True
     text = article_text(article)
     title = clean_spaces(article.get("title", "")).lower()
     hit = sum(1 for k in BREAKING_KEYWORDS if k in text)
     if not trusted_article(article):
         return False
-    if not has_market_impact(article):
+    if not has_market_impact(article) and not is_viral_breaking(article):
         return False
     if hit >= 2:
         return True
@@ -353,12 +412,16 @@ def is_breaking_candidate(article: Dict[str, Any]) -> bool:
 def score_article(article: Dict[str, Any]) -> int:
     text = article_text(article)
     score = 0
+    if is_viral_breaking(article):
+        score += 120
     if domain_is_trusted(article_domain(article)):
         score += 40
     if source_name_is_trusted(article_source_name(article)):
         score += 20
     if published_recent_enough(article, hours=24):
         score += 10
+    if published_recent_enough(article, hours=6):
+        score += 12
     if re.search(r"\d", text):
         score += 8
     for k in MARKET_KEYWORDS:
@@ -367,6 +430,8 @@ def score_article(article: Dict[str, Any]) -> int:
     for k in HIGH_IMPACT_KEYWORDS:
         if k in text:
             score += 5
+    if is_breaking_candidate(article):
+        score += 20
     return score
 
 
@@ -388,6 +453,84 @@ def score_breaking_article(article: Dict[str, Any]) -> int:
     if re.search(r"\d", text):
         score += 6
     return score
+
+
+def _fetch_newsapi_articles(
+    query: str,
+    *,
+    limit: int = 30,
+    hours_back: int = 12,
+    require_high_impact: bool = True,
+) -> List[Dict[str, Any]]:
+    if not API_KEY:
+        return []
+    params = {
+        "q": query,
+        "language": "en",
+        "sortBy": "publishedAt",
+        "pageSize": min(max(limit, 10), 100),
+        "from": (_now_utc() - timedelta(hours=hours_back)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "apiKey": API_KEY,
+    }
+    try:
+        data = requests.get("https://newsapi.org/v2/everything", params=params, timeout=20).json()
+    except Exception as e:
+        print(f"[news] extra query failed: {repr(e)}")
+        return []
+    if data.get("status") != "ok":
+        return []
+    out: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for article in data.get("articles", []) or []:
+        if not trusted_article(article):
+            continue
+        if is_sports_article(article):
+            continue
+        if require_high_impact and not has_market_impact(article) and not is_viral_breaking(article):
+            continue
+        if is_low_quality_text(article):
+            continue
+        if is_press_release_wire(article):
+            continue
+        if not published_recent_enough(article, hours=hours_back):
+            continue
+        if article_url_slug_year_stale(article):
+            continue
+        key = dedup_key(article)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(article)
+    return out
+
+
+def fetch_news_for_cards(limit: int = 40, hours_back: int = 12) -> List[Dict[str, Any]]:
+    """카드뉴스용 — 속보(총격·암살 등) 우선 병합."""
+    merged: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def _add(batch: List[Dict[str, Any]]) -> None:
+        for a in batch or []:
+            k = dedup_key(a)
+            if k and k not in seen:
+                seen.add(k)
+                merged.append(a)
+
+    hb = max(6, min(hours_back, 36))
+    _add(_fetch_newsapi_articles(VIRAL_SEARCH_QUERY, limit=25, hours_back=hb, require_high_impact=False))
+    _add(fetch_breaking_news(limit=20, hours_back=hb))
+    _add(fetch_news(limit=limit, hours_back=hb))
+
+    def _sort_key(a: Dict[str, Any]) -> tuple:
+        return (1 if is_viral_breaking(a) else 0, score_article(a))
+
+    merged.sort(key=_sort_key, reverse=True)
+    if merged:
+        print(
+            f"[news] fetch_news_for_cards n={len(merged)} "
+            f"viral_top={is_viral_breaking(merged[0])}"
+        )
+    return merged[:limit]
 
 
 def fetch_news(limit: int = 40, hours_back: int = 36) -> List[Dict[str, Any]]:
