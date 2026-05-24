@@ -18,33 +18,22 @@ _DISCLAIMER = (
     "※ 정리용 · 투자 권유 아님 · 레버·청산·슬리피지·거래소·규제 리스크 전제."
 )
 
-FINISHED_CARD_IMAGE_TEMPLATE = """Design a professional Korean financial Instagram news card — one finished 1080×1350px image (4:5 vertical), ready to post. Style reference: Korean securities firm / Bank of America Korea Instagram card news (BoA card).
+FINISHED_CARD_IMAGE_TEMPLATE = """Create ONE finished Korean financial Instagram news card, 1080×1350px, 4:5 vertical (BoA / Korean brokerage style).
 
-═══ 1. BACKGROUND PHOTO (upper ~58%) ═══
-Scene: {visual_scene}
-Photography: Premium editorial news (Reuters / Bloomberg / Korean brokerage social team).
-Lighting: Cinematic HDR, natural contrast, subtle film grain, realistic color grading (not oversaturated, not AI-neon).
-Composition: Main subject in upper-center or upper-third; lower area visually calmer and darker for text legibility.
-Lens feel: 35mm documentary, sharp subject, optional shallow depth of field.
-Forbidden: stock charts, candlesticks, trading screens, infographics, tables, logos, watermarks, English headlines, meme style.
+━━━ COPY THESE KOREAN LINES VERBATIM (do NOT replace with other news) ━━━
+Line 1: 「{line1}」
+Line 2: 「{line2}」
 
-═══ 2. BOTTOM GRADIENT (BoA-style, mandatory) ═══
-From 42% of frame height to bottom: smooth black→transparent gradient overlay.
-Bottom 25%: near-solid black (~95% opacity), fading upward with soft blend (no hard cut line).
-Photo and gradient must look professionally composited, not pasted.
+━━━ BACKGROUND must match the Korean headline story (same event) ━━━
+{visual_scene}
 
-═══ 3. KOREAN HEADLINE (burned into image, bottom-left) ═══
-Safe zone: 48px left margin, 72px bottom margin, max 2 lines only.
-Typeface: Clean Korean Gothic sans (Noto Sans KR / Apple SD Gothic Neo style).
-Line 1 — primary (extra-bold white #FFFFFF, ~64px scale):
-「{line1}」
-Line 2 — secondary (semibold white, ~38px scale, 10–14px below line 1):
-「{line2}」
-Typography rules: left-aligned; subtle 1px soft drop shadow only; NO thick outline, NO glow, NO stroke.
-Korean glyphs must be razor-sharp and fully readable.
+━━━ FORBIDDEN background (unless headline is about NYSE/listings) ━━━
+New York Stock Exchange building, Wall Street street canyon, giant US flag on exchange facade, generic traders with tablets.
 
-═══ 4. OVERALL ═══
-Polished Korean Instagram financial card (증권사 카드뉴스). Neutral, authoritative, premium — not banner ad, not clickbait."""
+━━━ LAYOUT ━━━
+Photorealistic editorial photo, upper 58% = background. Bottom 42%: smooth black gradient (~95% black at bottom).
+White Korean Gothic text bottom-left (48px left, 72px bottom margin), line1 bold larger, line2 smaller, 1px soft shadow only.
+No charts, candlesticks, logos, watermarks, English text in image."""
 
 
 @dataclass
@@ -377,20 +366,49 @@ def infer_instagram_card_topic(article: Dict[str, Any]) -> tuple[str, str]:
     ).lower()
     rules: List[tuple] = [
         (
+            (
+                "iran",
+                "tehran",
+                "hormuz",
+                "ceasefire",
+                "nuclear",
+                "이란",
+                "휴전",
+                "핵",
+                "u.s.-iran",
+                "us-iran",
+                "diplomat",
+            ),
+            "미·이란",
+            "US and Iran diplomats at negotiation table or summit handshake, Middle East or neutral "
+            "conference room, subdued flags, serious tone — NOT New York Stock Exchange, NOT Wall Street",
+        ),
+        (
             ("iran", "hormuz", "opec", "oil", "gas", "crude", "wti", "유가", "정유", "휘발유", "energy"),
             "에너지·유가",
             "offshore oil rig or Strait of Hormuz tankers at dramatic dusk, orange sky and dark sea, "
-            "refinery lights bokeh in distance, Reuters documentary framing, upper frame clear",
+            "refinery lights bokeh in distance — NOT stock exchange building",
+        ),
+        (
+            ("assassination", "shooting", "shot", "gunman", "총격", "피격"),
+            "속보",
+            "breaking news press scene or secure government building exterior, dramatic lighting, "
+            "no stock exchange facade",
+        ),
+        (
+            ("trump", "white house", "president trump"),
+            "트럼프·정치",
+            "White House exterior or presidential motorcade, Capitol press stakeout — NOT NYSE facade",
         ),
         (
             ("bitcoin", "btc", "crypto", "warsh", "fed chair", "fed chairman", "powell"),
             "연준·비트코인",
-            "White House ceremony or Federal Reserve building with subtle Bitcoin motif, no price chart",
+            "Federal Reserve building or Fed press room, subtle finance motif — NOT NYSE flag facade",
         ),
         (
             ("fed", "cpi", "rate", "yield", "bond", "금리", "국채", "인플레", "treasury"),
             "금리·매크로",
-            "Federal Reserve press conference or US Treasury bond trading floor, Wall Street",
+            "Federal Reserve press conference or US Treasury hearing room — NOT generic NYSE building",
         ),
         (
             ("nvidia", "semiconductor", "ai", "chip", "반도체", "삼성", "하이닉스"),
@@ -408,20 +426,112 @@ def infer_instagram_card_topic(article: Dict[str, Any]) -> tuple[str, str]:
             "currency exchange trading desk, US dollar and Korean won imagery",
         ),
         (
-            ("war", "military", "missile", "전쟁", "공습", "휴전"),
+            ("war", "military", "missile", "전쟁", "공습"),
             "지정학",
-            "diplomatic summit or geopolitical news scene, restrained tone",
+            "conflict zone skyline or military/diplomatic briefing, restrained — NOT stock exchange",
         ),
         (
-            ("trump", "biden", "white house", "대통령", "관세", "tariff"),
+            ("biden", "대통령", "관세", "tariff", "policy"),
             "정치·정책",
-            "White House or US Capitol policy briefing scene",
+            "US Capitol or White House policy briefing, no NYSE",
         ),
     ]
     for keys, label, visual_en in rules:
         if any(k in blob for k in keys):
             return label, visual_en
     return "글로벌 시장", "global financial markets editorial scene, photorealistic, no charts"
+
+
+def _story_blob(
+    line1: str, line2: str, article: Optional[Dict[str, Any]] = None
+) -> str:
+    parts = [line1, line2]
+    if article:
+        parts.append(news_module.clean_spaces(article.get("title", "") or ""))
+        parts.append(
+            news_module.clean_spaces(article.get("description", "") or "")[:400]
+        )
+    return " ".join(parts).lower()
+
+
+def _visual_scene_for_story(blob: str, fallback: str) -> str:
+    """카피·기사 키워드와 맞는 배경(영문)."""
+    if any(
+        k in blob
+        for k in (
+            "iran",
+            "이란",
+            "휴전",
+            "핵",
+            "hormuz",
+            "tehran",
+            "ceasefire",
+            "nuclear",
+            "diplomat",
+        )
+    ):
+        return (
+            "US and Iran diplomats negotiating, formal meeting table or summit handshake, "
+            "Middle East diplomatic setting, serious mood, upper area clear for text — "
+            "absolutely NOT New York Stock Exchange or Wall Street trading floor"
+        )
+    if any(k in blob for k in ("trump", "트럼프", "assassination", "shooting", "총격")):
+        return (
+            "White House or Capitol breaking-news scene, security perimeter, press lights — "
+            "NOT stock exchange building with US flag"
+        )
+    if any(k in blob for k in ("oil", "유가", "wti", "crude", "opec", "정유")):
+        return (
+            "oil tankers or refinery at dusk, energy crisis mood — NOT NYSE or trading floor"
+        )
+    if any(k in blob for k in ("fed", "연준", "금리", "cpi", "powell")):
+        return (
+            "Federal Reserve press conference room or chair podium — NOT NYSE facade"
+        )
+    if any(k in blob for k in ("kospi", "코스피", "코스닥", "증시")):
+        return "Seoul Exchange or Yeouido financial district skyline, no chart screenshot"
+    return fallback
+
+
+def _visual_mismatch(visual: str, blob: str) -> bool:
+    v = visual.lower()
+    nyse_cues = (
+        "stock exchange",
+        "nyse",
+        "wall street",
+        "american flag on",
+        "exchange facade",
+        "trading floor",
+    )
+    iran_story = any(
+        k in blob for k in ("iran", "이란", "휴전", "핵", "hormuz", "ceasefire", "nuclear")
+    )
+    trump_story = any(k in blob for k in ("trump", "트럼프", "연준", "fed", "금리"))
+    if iran_story and any(c in v for c in nyse_cues):
+        return True
+    if iran_story and "iran" not in v and "diplomat" not in v and "middle east" not in v:
+        if any(c in v for c in nyse_cues + ("federal reserve", "white house")):
+            return True
+    if trump_story and not iran_story and any(c in v for c in nyse_cues):
+        return True
+    return False
+
+
+def align_pack_to_story(
+    pack: InstagramCardPack, lead_article: Dict[str, Any]
+) -> InstagramCardPack:
+    """한글 카피·배경·기사 주제 일치."""
+    blob = _story_blob(pack.line1, pack.line2, lead_article)
+    topic, vis_default = infer_instagram_card_topic(lead_article)
+    vis = pack.visual_scene_en.strip()
+    if _visual_mismatch(vis, blob):
+        vis = _visual_scene_for_story(blob, vis_default)
+        print("[reference_pipeline] visual_scene realigned to match headline")
+    elif len(vis) < 60:
+        vis = _visual_scene_for_story(blob, vis_default)
+    pack.topic = topic
+    pack.visual_scene_en = vis[:500]
+    return pack
 
 
 def build_finished_card_image_prompt(line1: str, line2: str, visual_scene_en: str) -> str:
@@ -460,9 +570,10 @@ def _openai_instagram_card_pack(
         "Spell 코스피 never 코스파. "
         "Spell indices correctly: 코스피 (never 코스파), 코스닥. "
         "caption: 2-3 Korean sentences, neutral, for Instagram post. "
-        "visual_scene_en: 2-3 English sentences — subject, lighting, camera angle, mood; "
-        "editorial photorealistic; mention upper frame clear for text; no chart/text in scene. "
-        "Facts must match the article only."
+        "visual_scene_en: 2 English sentences for BACKGROUND ONLY — must depict the SAME event as line1/line2. "
+        "If story is US-Iran/ceasefire/nuclear: diplomats, negotiation, Middle East — NEVER NYSE or Wall Street. "
+        "If story is Trump/Fed: White House or Fed — NEVER NYSE flag facade. "
+        "Facts must match TITLE/BODY only."
     )
     user = f"TOPIC:{topic}\nQUOTES:{quotes or 'n/a'}\nTITLE:\n{title}\n\nBODY:\n{desc}\n"
     try:
@@ -486,13 +597,14 @@ def _openai_instagram_card_pack(
         if l1 and not l1.endswith((",", "，")) and len(l1) < 30:
             l1 = l1 + ","
         print("[reference_pipeline] openai instagram card pack ok")
-        return InstagramCardPack(
+        pack = InstagramCardPack(
             line1=sanitize_card_korean(l1[:90]),
             line2=sanitize_card_korean(l2[:140]),
             caption=sanitize_card_korean(cap[:600] or l2),
             topic=topic,
-            visual_scene_en=vis[:300],
+            visual_scene_en=vis[:500],
         )
+        return align_pack_to_story(pack, lead_article)
     except Exception as e:
         print(f"[reference_pipeline] openai card pack failed: {repr(e)}")
         return None
@@ -521,22 +633,24 @@ def generate_instagram_card_pack(
 
     if ko:
         l1, l2 = ko
-        return InstagramCardPack(
+        pack = InstagramCardPack(
             line1=sanitize_card_korean(l1),
             line2=sanitize_card_korean(l2),
             caption=sanitize_card_korean(l2),
             topic=topic,
             visual_scene_en=visual_en,
         )
+        return align_pack_to_story(pack, lead_article)
 
     title = news_module.clean_spaces(lead_article.get("title", "") or "")[:80]
-    return InstagramCardPack(
+    pack = InstagramCardPack(
         line1="시장 변수 점검,",
         line2=sanitize_card_korean(title or "글로벌 뉴스 흐름 확인"),
         caption="관련 뉴스에 따르면 시장 변수를 점검할 필요가 있습니다.",
         topic=topic,
         visual_scene_en=visual_en,
     )
+    return align_pack_to_story(pack, lead_article)
 
 
 def build_instagram_hashtags(
@@ -587,7 +701,17 @@ def build_telegram_delivery_messages(
     image_prompt = build_finished_card_image_prompt(
         pack.line1, pack.line2, pack.visual_scene_en
     )
-    cap_lines = [pack.caption.strip(), "", build_instagram_hashtags(pack, lead_article)]
+    cap_lines = [
+        "━━ 생성 확인 (이미지가 다르면 재시도) ━━",
+        f"1줄: {pack.line1}",
+        f"2줄: {pack.line2}",
+        f"주제: {pack.topic}",
+        "※ 한글·배경이 위와 다르면 ChatGPT가 프롬프트를 무시한 것 → 같은 프롬프트 재생성",
+        "",
+        pack.caption.strip(),
+        "",
+        build_instagram_hashtags(pack, lead_article),
+    ]
     if lead_src:
         cap_lines.extend(["", f"출처: {lead_src}"])
     if lead_url:
