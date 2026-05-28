@@ -20,6 +20,20 @@ SEARCH_QUERY = (
     'OR "iran" OR "israel" OR "ceasefire" OR "war" OR "hormuz" OR "dollar" OR "fx" '
     'OR "KRW" OR "korean won" OR "won/dollar" OR "dollar/won")'
 )
+# 코스피·코스닥·신고가 등 — 카드뉴스용 대중 이슈 우선 병합
+KOREA_MARKET_SEARCH_QUERY = (
+    '("kospi" OR "kosdaq" OR "korean stock" OR "seoul stocks" OR "south korea market") '
+    'AND ("record" OR "high" OR "surge" OR "rally" OR "plunge" OR "break" OR "milestone" '
+    'OR "foreign" OR "investor" OR "chip" OR "semiconductor")'
+)
+# 버핏·대형주·지정학 — 인스타 카드뉴스용 메인스트림 이슈
+MAINSTREAM_CARD_SEARCH_QUERY = (
+    '("warren buffett" OR "berkshire hathaway" OR buffett) '
+    'OR ("nvidia" OR "apple" OR "tesla" OR "microsoft" OR "amazon") '
+    'AND ("surge" OR "fall" OR "record" OR "plunge" OR "rally" OR "buy" OR "sell") '
+    'OR ("war" OR "invasion" OR "ceasefire" OR "missile" OR "airstrike") '
+    'OR ("investigation" OR "scandal" OR "lawsuit" OR "recall" OR "fraud")'
+)
 # 속보·테러·총격 등 — 메인 쿼리에 안 잡히면 별도 호출로 앞에 합침
 VIRAL_SEARCH_QUERY = (
     '("trump" AND ("shot" OR "shooting" OR "assassination" OR "gunman" OR "attack" OR "wounded"))'
@@ -55,6 +69,185 @@ MARKET_KEYWORDS = [
     "yield", "rate cut", "nasdaq", "s&p", "dow", "ceasefire", "iran",
     "israel", "war", "attack", "hormuz", "dollar", "fx", "krw", "환율",
     "유가", "금리", "물가", "비트", "달러", "금값",
+    "kospi", "kosdaq", "korean stock", "seoul", "record high", "all-time",
+    "milestone", "surge", "rally", "plunge", "semiconductor", "nvidia",
+]
+# 카드뉴스 — 대중·흥미·놀라움 (수치·돌파·신고가)
+POPULAR_CARD_KEYWORDS = [
+    "kospi", "kosdaq", "코스피", "코스닥", "record high", "all-time", "all time",
+    "milestone", "historic", "first time", "breaks", "above", "surge", "soar",
+    "rally", "jumps", "plunge", "crash", "unexpected", "shock", "stunning",
+    "bitcoin", "nvidia", "semiconductor", "tariff", "rate cut", "cpi",
+    "inflation", "oil", "gold", "fed", "nasdaq", "s&p", "dow",
+    "신고가", "돌파", "급등", "급락", "역대",
+]
+# 종교·일반 윤리 등 — 시장 무관·클릭률 낮음
+OBSCURE_CARD_PENALTY = [
+    "pope", "vatican", "archbishop", "cardinal", "homily", "mass at",
+    "autonomous weapon", "humanitarian award", "obituary", "celebrity wedding",
+    "royal wedding", "fashion week", "recipe", "horoscope",
+    "data ownership", "ethical ai", "ai ethics", "ai warning",
+    "conference keynote", "wellness", "yoga", "horoscope",
+]
+# 인스타 카드 — 무조건 통과해야 하는 '훅' (하나 이상)
+MANDATORY_CARD_HOOK_ALWAYS = (
+    "kospi",
+    "kosdaq",
+    "코스피",
+    "코스닥",
+    "buffett",
+    "berkshire",
+    "warren buffett",
+    "war",
+    "invasion",
+    "missile",
+    "airstrike",
+    "ceasefire",
+    "iran",
+    "israel",
+    "hormuz",
+    "전쟁",
+    "공습",
+    "발포",
+    "assassination",
+    "shooting",
+    "gunman",
+    "trump",
+    "tariff",
+    "scandal",
+    "fraud",
+    "investigation",
+    "lawsuit",
+    "probe",
+    "recall",
+    "논란",
+    "기소",
+)
+MANDATORY_CARD_HOOK_WITH_MOVE = (
+    "nvidia",
+    "apple",
+    "tesla",
+    "microsoft",
+    "amazon",
+    "meta",
+    "semiconductor",
+    "삼성",
+    "하이닉스",
+    "fed",
+    "cpi",
+    "rate cut",
+    "rate hike",
+    "oil",
+    "wti",
+    "crude",
+    "gold",
+    "nasdaq",
+    "s&p",
+    "dow",
+    "bitcoin",
+    "btc",
+)
+CARD_HOOK_MOVE_WORDS = (
+    "surge",
+    "soar",
+    "plunge",
+    "crash",
+    "rally",
+    "record",
+    "historic",
+    "milestone",
+    "breaks",
+    "jumps",
+    "slump",
+    "급등",
+    "급락",
+    "돌파",
+    "신고가",
+    "역대",
+    "unexpected",
+    "shock",
+    "buy",
+    "sell",
+    "stake",
+    "매수",
+    "매도",
+    "%",
+    "percent",
+    "all-time",
+    "all time",
+)
+# 거래소 상품·디파이 출시 등 — 카드뉴스에 안 맞는 니치 크립토
+NICHE_CRYPTO_PRODUCT_MARKERS = (
+    "unveils",
+    "vault",
+    "launches",
+    "introduces",
+    "staking",
+    "defi",
+    "yield push",
+    "earn rewards",
+    "new product",
+    "wallet feature",
+    "partnership with",
+    "kraken",
+    "coinbase card",
+    "exchange adds",
+    "expanding yield",
+    "for btc holders",
+    "crypto product",
+)
+# BTC 가격 급등락·신고가는 니치에서 제외
+CRYPTO_PRICE_MOVE_MARKERS = (
+    "surge",
+    "crash",
+    "plunge",
+    "rally",
+    "soar",
+    "tumble",
+    "record high",
+    "all-time",
+    "all time",
+    "breaks",
+    "hits $",
+    "above $",
+    "below $",
+    "%",
+    "percent",
+)
+# 인스타 카드 — 대중 이슈 가산
+INSTAGRAM_CARD_BOOST_GROUPS: List[tuple] = [
+    (("buffett", "berkshire", "warren buffett"), 42),
+    (("kospi", "kosdaq", "코스피", "코스닥"), 45),
+    (
+        (
+            "war",
+            "invasion",
+            "ceasefire",
+            "missile",
+            "airstrike",
+            "전쟁",
+            "공습",
+            "발포",
+        ),
+        38,
+    ),
+    (
+        (
+            "investigation",
+            "scandal",
+            "lawsuit",
+            "probe",
+            "fraud",
+            "recall",
+            "논란",
+            "기소",
+        ),
+        32,
+    ),
+    (
+        ("nvidia", "apple", "tesla", "microsoft", "amazon", "meta", "google"),
+        22,
+    ),
 ]
 HIGH_IMPACT_KEYWORDS = [
     "oil", "wti", "crude", "brent", "hormuz", "fed", "inflation", "cpi",
@@ -409,8 +602,108 @@ def is_breaking_candidate(article: Dict[str, Any]) -> bool:
     return any(x in title for x in ["ceasefire", "missile", "attack", "tariff", "fed", "rate", "oil", "bitcoin"])
 
 
+def instagram_card_min_score() -> int:
+    try:
+        return max(80, int((os.getenv("INSTAGRAM_CARD_MIN_SCORE") or "100").strip()))
+    except ValueError:
+        return 100
+
+
+def is_mandatory_mainstream_card_topic(article: Dict[str, Any]) -> bool:
+    """
+    인스타 카드 — 대중·흥미 훅이 없으면 무조건 제외.
+    속보·코스피·버핏·전쟁·스캔들·대형 급변·지수 돌파만 통과.
+    """
+    if is_viral_breaking(article):
+        return True
+    if is_niche_crypto_product_article(article):
+        return False
+    text = article_text(article).lower()
+    title_l = clean_spaces(article.get("title", "") or "").lower()
+    blob = f"{title_l} {text}"
+    for k in OBSCURE_CARD_PENALTY:
+        if k in blob:
+            return False
+    boring = (
+        "vault",
+        "unveils",
+        "launches product",
+        "new feature",
+        "podcast",
+        "newsletter",
+        "opinion column",
+    )
+    if any(k in blob for k in boring) and not any(
+        k in blob for k in MANDATORY_CARD_HOOK_ALWAYS
+    ):
+        return False
+    if any(k in blob for k in MANDATORY_CARD_HOOK_ALWAYS):
+        return True
+    has_move = any(m in blob for m in CARD_HOOK_MOVE_WORDS) or bool(
+        re.search(r"\d", title_l)
+    )
+    if not has_move:
+        return False
+    if any(k in blob for k in MANDATORY_CARD_HOOK_WITH_MOVE):
+        if any(k in blob for k in ("bitcoin", "btc")):
+            return any(k in blob for k in CRYPTO_PRICE_MOVE_MARKERS)
+        return True
+    if re.search(r"\b(record|milestone|all[- ]time|historic)\b", blob):
+        return True
+    return False
+
+
+def is_niche_crypto_product_article(article: Dict[str, Any]) -> bool:
+    """거래소·디파이 상품 출시 등 — BTC 시세 급변 뉴스는 제외하지 않음."""
+    if is_viral_breaking(article):
+        return False
+    text = article_text(article).lower()
+    title_l = clean_spaces(article.get("title", "") or "").lower()
+    blob = f"{title_l} {text}"
+    if not any(k in blob for k in ("bitcoin", "btc", "crypto", "ethereum", "eth", "defi")):
+        return False
+    if any(k in blob for k in CRYPTO_PRICE_MOVE_MARKERS):
+        return False
+    product_hit = sum(1 for m in NICHE_CRYPTO_PRODUCT_MARKERS if m in blob)
+    if product_hit >= 2:
+        return True
+    if product_hit >= 1 and any(
+        k in blob for k in ("unveil", "vault", "launch", "introduce", "yield", "staking", "holders")
+    ):
+        return True
+    return False
+
+
+def score_instagram_card_article(article: Dict[str, Any]) -> int:
+    """인스타 카드뉴스 선별용 — 메인스트림·대중 이슈 우선, 니치 크립토·무관 주제 감점."""
+    if not is_mandatory_mainstream_card_topic(article):
+        return -999
+    if is_niche_crypto_product_article(article):
+        return -999
+    score = score_article(article)
+    text = article_text(article)
+    title_l = clean_spaces(article.get("title", "") or "").lower()
+    blob = f"{title_l} {text}"
+    for keys, bonus in INSTAGRAM_CARD_BOOST_GROUPS:
+        if any(k in blob for k in keys):
+            score += bonus
+    if re.search(r"\b\d{3,5}\b", blob) and any(
+        k in blob for k in ("kospi", "kosdaq", "코스피", "index", "s&p", "nasdaq", "dow")
+    ):
+        score += 28
+    if any(k in blob for k in ("buffett", "berkshire")) and any(
+        k in blob for k in ("buy", "sell", "stake", "purchase", "매수", "매도", "지분")
+    ):
+        score += 35
+    if "bitcoin" in blob or "btc" in blob:
+        if not any(k in blob for k in CRYPTO_PRICE_MOVE_MARKERS):
+            score -= 25
+    return score
+
+
 def score_article(article: Dict[str, Any]) -> int:
     text = article_text(article)
+    title_l = clean_spaces(article.get("title", "") or "").lower()
     score = 0
     if is_viral_breaking(article):
         score += 120
@@ -430,6 +723,16 @@ def score_article(article: Dict[str, Any]) -> int:
     for k in HIGH_IMPACT_KEYWORDS:
         if k in text:
             score += 5
+    for k in POPULAR_CARD_KEYWORDS:
+        if k in text or k in title_l:
+            score += 9
+    if any(k in text or k in title_l for k in ("kospi", "kosdaq", "코스피", "코스닥")):
+        score += 25
+    if re.search(r"\b(record|milestone|all[- ]time|historic|breaks?\s+\d)\b", text):
+        score += 18
+    for k in OBSCURE_CARD_PENALTY:
+        if k in text or k in title_l:
+            score -= 45
     if is_breaking_candidate(article):
         score += 20
     return score
@@ -518,11 +821,21 @@ def fetch_news_for_cards(limit: int = 40, hours_back: int = 12) -> List[Dict[str
 
     hb = max(6, min(hours_back, 36))
     _add(_fetch_newsapi_articles(VIRAL_SEARCH_QUERY, limit=25, hours_back=hb, require_high_impact=False))
+    _add(
+        _fetch_newsapi_articles(
+            KOREA_MARKET_SEARCH_QUERY, limit=20, hours_back=hb, require_high_impact=False
+        )
+    )
+    _add(
+        _fetch_newsapi_articles(
+            MAINSTREAM_CARD_SEARCH_QUERY, limit=22, hours_back=hb, require_high_impact=False
+        )
+    )
     _add(fetch_breaking_news(limit=20, hours_back=hb))
     _add(fetch_news(limit=limit, hours_back=hb))
 
     def _sort_key(a: Dict[str, Any]) -> tuple:
-        return (1 if is_viral_breaking(a) else 0, score_article(a))
+        return (1 if is_viral_breaking(a) else 0, score_instagram_card_article(a))
 
     merged.sort(key=_sort_key, reverse=True)
     if merged:

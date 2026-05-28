@@ -29,6 +29,7 @@ Line 2: 「{line2}」
 
 ━━━ FORBIDDEN background (unless headline is about NYSE/listings) ━━━
 New York Stock Exchange building, Wall Street street canyon, giant US flag on exchange facade, generic traders with tablets.
+Crypto exchange product UI, Kraken/Coinbase branding, DeFi vault screens, staking yield dashboards.
 
 ━━━ LAYOUT ━━━
 Photorealistic editorial photo, upper 58% = background. Bottom 42%: smooth black gradient (~95% black at bottom).
@@ -344,7 +345,7 @@ def collect_articles_for_prompt(
         if not k or k in seen:
             continue
         try:
-            sc = float(news_module.score_article(a))
+            sc = float(news_module.score_instagram_card_article(a))
         except Exception:
             sc = 0.0
         scored.append((sc, a))
@@ -365,6 +366,32 @@ def infer_instagram_card_topic(article: Dict[str, Any]) -> tuple[str, str]:
         ]
     ).lower()
     rules: List[tuple] = [
+        (
+            ("kospi", "kosdaq", "코스피", "코스닥", "korean stock", "seoul stocks"),
+            "한국 증시",
+            "Seoul financial district, Korea Exchange exterior, busy trading floor screens "
+            "with Korean context — NOT crypto exchange logos, NOT NYSE facade",
+        ),
+        (
+            ("buffett", "berkshire", "warren"),
+            "버핏·대형주",
+            "Warren Buffett at Berkshire annual meeting or Omaha skyline with finance mood, "
+            "editorial photo — NOT crypto vault or DeFi imagery",
+        ),
+        (
+            (
+                "investigation",
+                "scandal",
+                "lawsuit",
+                "probe",
+                "fraud",
+                "recall",
+                "논란",
+            ),
+            "대기업 이슈",
+            "corporate headquarters press scrum or courtroom steps, serious editorial — "
+            "NOT stock exchange flag facade",
+        ),
         (
             (
                 "iran",
@@ -401,11 +428,6 @@ def infer_instagram_card_topic(article: Dict[str, Any]) -> tuple[str, str]:
             "White House exterior or presidential motorcade, Capitol press stakeout — NOT NYSE facade",
         ),
         (
-            ("bitcoin", "btc", "crypto", "warsh", "fed chair", "fed chairman", "powell"),
-            "연준·비트코인",
-            "Federal Reserve building or Fed press room, subtle finance motif — NOT NYSE flag facade",
-        ),
-        (
             ("fed", "cpi", "rate", "yield", "bond", "금리", "국채", "인플레", "treasury"),
             "금리·매크로",
             "Federal Reserve press conference or US Treasury hearing room — NOT generic NYSE building",
@@ -416,9 +438,10 @@ def infer_instagram_card_topic(article: Dict[str, Any]) -> tuple[str, str]:
             "semiconductor fab cleanroom or Silicon Valley tech campus, editorial photo",
         ),
         (
-            ("kospi", "kosdaq", "코스피", "코스닥", "외국인", "증시", "stock market"),
-            "한국 증시",
-            "Seoul financial district and Korea Exchange exterior, no index chart screenshot",
+            ("bitcoin", "btc", "crypto"),
+            "비트코인 시세",
+            "Bitcoin price board or macro trading desk with BTC ticker — NOT crypto exchange product "
+            "launch, NOT Kraken/Coinbase branding, NOT DeFi vault UI",
         ),
         (
             ("dollar", "won", "fx", "환율", "원달러"),
@@ -564,15 +587,20 @@ def _openai_instagram_card_pack(
         "You create Korean Instagram financial news cards (1080x1350, BoA/broker style). "
         "Output JSON only: "
         '{"line1":"...","line2":"...","caption":"...","visual_scene_en":"..."}. '
-        "line1: Korean hook headline max ~24 chars — strong, scroll-stopping, comma at end when natural. "
+        "Prefer mainstream Instagram hooks: KOSPI/KOSDAQ milestones, Buffett buys, mega-cap moves, "
+        "war/geopolitics, Fed/CPI, oil, major scandals. "
+        "MANDATORY hooks only: KOSPI milestone, Buffett, war, mega-cap shock, Fed/CPI, oil, scandal. "
+        "NEVER: crypto exchange products, pope, AI ethics, Kraken vault, generic product news. "
+        "line1: Korean hook max ~24 chars — surprise number or milestone first, comma when natural. "
         "For assassination/shooting/breaking: urgent but factual (속보 톤). "
-        "line2: Korean punch line max ~48 chars — why it matters now, not index laundry list. "
+        "line2: Korean punch line max ~48 chars — why it matters now, not vague commentary. "
         "Spell 코스피 never 코스파. "
         "Spell indices correctly: 코스피 (never 코스파), 코스닥. "
         "caption: 2-3 Korean sentences, neutral, for Instagram post. "
         "visual_scene_en: 2 English sentences for BACKGROUND ONLY — must depict the SAME event as line1/line2. "
         "If story is US-Iran/ceasefire/nuclear: diplomats, negotiation, Middle East — NEVER NYSE or Wall Street. "
         "If story is Trump/Fed: White House or Fed — NEVER NYSE flag facade. "
+        "If story is KOSPI/Korean stocks: trading floor, Seoul skyline, screens — not Vatican or pope. "
         "Facts must match TITLE/BODY only."
     )
     user = f"TOPIC:{topic}\nQUOTES:{quotes or 'n/a'}\nTITLE:\n{title}\n\nBODY:\n{desc}\n"
@@ -673,9 +701,10 @@ def build_instagram_hashtags(
         (("trump", "트럼프", "총격", "assassination", "shooting"), "#트럼프"),
         (("iran", "이란", "hormuz", "oil", "유가", "wti"), "#유가"),
         (("fed", "연준", "금리", "cpi"), "#연준"),
+        (("buffett", "berkshire", "버핏"), "#버핏"),
+        (("war", "전쟁", "attack", "지정학", "이란"), "#국제정세"),
+        (("kospi", "코스피", "코스닥", "증시"), "#코스피"),
         (("bitcoin", "btc", "비트"), "#비트코인"),
-        (("war", "전쟁", "attack", "지정학"), "#국제정세"),
-        (("kospi", "코스피", "증시", "stock"), "#코스피"),
         (("semiconductor", "반도체", "nvidia"), "#반도체"),
     ]
     for keys, tag in rules:

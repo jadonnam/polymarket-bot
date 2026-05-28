@@ -28,11 +28,11 @@ except ImportError:  # pragma: no cover
 W, H = 1080, 1350
 PAD_X = 48
 BOTTOM_ZONE = 620
-# BoA/삼성형 레퍼런스 (1080×1350) — assets/card_references/ref_photo_bank.png 기준
-BOA_H1_PX = 78
-BOA_H2_PX = 48
-BOA_BOTTOM_MARGIN = 56
-BOA_GRADIENT_START = 0.36
+# BoA/삼성형 레퍼런스 (1080×1350) — 가독·임팩트 우선 (기본값 상향)
+BOA_H1_PX = 94
+BOA_H2_PX = 56
+BOA_BOTTOM_MARGIN = 52
+BOA_GRADIENT_START = 0.34
 CARD_IMPACT_STYLE = (os.getenv("CARD_IMPACT_STYLE") or "true").lower() == "true"
 CARD_PHOTO_SHOW_SOURCE = (os.getenv("CARD_PHOTO_SHOW_SOURCE") or "false").lower() == "true"
 # NewsAPI urlToImage — 차트·무관 썸네일이 많아 기본 off. photo(BoA형)는 env와 무관하게 항상 폴백만.
@@ -72,12 +72,17 @@ def _try_openai_korean_card_lines(article: Dict[str, Any]) -> Optional[Tuple[str
     client = OpenAI(api_key=(os.getenv("OPENAI_API_KEY") or "").strip())
     sys = (
         "You write Korean headlines for a 1080x1350 Instagram financial news card (BoA/broker style). "
-        "Style: concise neutral wire — Korean securities Instagram card news. "
-        "No emoji, no clickbait, no exclamation. "
-        'Output JSON only: {"line1":"...","line2":"..."}. '
-        "line1 = hook headline (한글, max ~26 chars). Comma at end when natural. May use …. "
-        "line2 = context/impact (한글, max ~52 chars). "
-        "Keep tickers in Latin when natural (NVDA, Fed). Facts unchanged."
+        "Pick scroll-stopping MAINSTREAM market stories: KOSPI/KOSDAQ records (e.g. 8100), "
+        "Buffett/Berkshire buys, mega-cap surges, war/geopolitics, Fed/CPI, oil, big scandals. "
+        "MANDATORY: only mainstream hooks — KOSPI record, Buffett buy, war/geopolitics, mega-cap shock, "
+        "Fed/CPI surprise, oil/gold spike, major scandal. "
+        "NEVER: crypto exchange products, pope/religion, AI ethics, product launches, Kraken vault. "
+        "Tone: punchy Korean brokerage card — vivid but factual. No emoji. No fake facts. "
+        'Output JSON only: {"line1":"...","line2":"...","emphasis":["..."]}. '
+        "line1 = hook (한글, max ~26 chars). Lead with the surprise number/event. Comma at end when natural. "
+        "line2 = why it matters now (한글, max ~52 chars). "
+        "emphasis = 1–3 exact substrings from line1 to highlight in color (digits, 코스피, 돌파, 신고가…). "
+        "Spell 코스피 never 코스파. Keep tickers in Latin when natural (NVDA, Fed)."
     )
     user = f"TITLE:\n{title}\n\nLEAD:\n{desc}\n"
     try:
@@ -95,9 +100,16 @@ def _try_openai_korean_card_lines(article: Dict[str, Any]) -> Optional[Tuple[str
         return None
     l1 = (d.get("line1") or "").strip()
     l2 = (d.get("line2") or "").strip()
+    emph_raw = d.get("emphasis")
+    emphasis: List[str] = []
+    if isinstance(emph_raw, list):
+        emphasis = [str(x).strip() for x in emph_raw if str(x).strip()]
+    elif isinstance(emph_raw, str) and emph_raw.strip():
+        emphasis = [emph_raw.strip()]
     if len(l1) < 6:
         return None
     print("[card_ko] openai korean headline ok")
+    article["_ko_emphasis"] = [e[:40] for e in emphasis[:4] if e in l1 or e in l2]
     return l1[:110], l2[:240]
 
 
@@ -415,8 +427,8 @@ def _apply_photo_bottom_gradient(img: Image.Image) -> None:
     d = ImageDraw.Draw(overlay)
     y0 = int(img.height * BOA_GRADIENT_START)
     span = max(img.height - y0 - 1, 1)
-    power = 1.2 if CARD_IMPACT_STYLE else 1.35
-    max_a = 252 if CARD_IMPACT_STYLE else 245
+    power = 1.15 if CARD_IMPACT_STYLE else 1.35
+    max_a = 255 if CARD_IMPACT_STYLE else 245
     for y in range(y0, img.height):
         t = (y - y0) / span
         alpha = int(12 + max_a * (t**power))
@@ -493,6 +505,108 @@ def _draw_text_impact(
     for dx, dy, a in ((0, 3, 140), (2, 2, 90), (0, 0, 255)):
         draw.text((x + dx, y + dy), text, font=font, fill=(0, 0, 0, a))
     draw.text((x, y), text, font=font, fill=fill)
+
+
+_COLOR_WHITE = (255, 255, 255, 255)
+_COLOR_GOLD = (255, 214, 72, 255)
+_COLOR_MINT = (118, 255, 178, 255)
+_COLOR_CORAL = (255, 118, 102, 255)
+_COLOR_SKY = (130, 210, 255, 255)
+
+_ACCENT_RULES: List[Tuple[re.Pattern[str], Tuple[int, int, int, int]]] = [
+    (re.compile(r"\d[\d,.\d]*%?"), _COLOR_GOLD),
+    (re.compile(r"코스피|코스닥|KOSPI|KOSDAQ", re.I), _COLOR_MINT),
+    (re.compile(r"돌파|신고가|역대|최고|급등|상승|surge|rally|record", re.I), _COLOR_MINT),
+    (re.compile(r"급락|폭락|하락|crash|slump|plunge", re.I), _COLOR_CORAL),
+    (re.compile(r"비트코인|BTC|이더리움|ETH|연준|Fed|NVDA|엔비디아", re.I), _COLOR_SKY),
+]
+
+
+def _color_for_token(token: str, *, user_emphasis: bool = False) -> Tuple[int, int, int, int]:
+    if user_emphasis:
+        return _COLOR_GOLD
+    for pat, col in _ACCENT_RULES:
+        if pat.search(token):
+            return col
+    return _COLOR_WHITE
+
+
+def _headline_colored_segments(
+    text: str,
+    *,
+    emphasis_words: Optional[List[str]] = None,
+) -> List[Tuple[str, Tuple[int, int, int, int]]]:
+    """한 줄을 (조각, RGBA) 리스트로 — 숫자·지수·강조어 색상."""
+    if not text:
+        return []
+    emphasis_words = emphasis_words or []
+    emph_lower = [e.lower() for e in emphasis_words if e]
+
+    spans: List[Tuple[int, int, bool]] = []
+    for ew in emphasis_words:
+        if not ew:
+            continue
+        start = 0
+        while True:
+            i = text.find(ew, start)
+            if i < 0:
+                break
+            spans.append((i, i + len(ew), True))
+            start = i + len(ew)
+    for pat, _ in _ACCENT_RULES:
+        for m in pat.finditer(text):
+            spans.append((m.start(), m.end(), False))
+    if not spans:
+        return [(text, _COLOR_WHITE)]
+
+    spans.sort(key=lambda t: t[0])
+    merged: List[Tuple[int, int, bool]] = []
+    for s, e, ue in spans:
+        if merged and s <= merged[-1][1]:
+            prev_s, prev_e, prev_ue = merged[-1]
+            merged[-1] = (prev_s, max(prev_e, e), prev_ue or ue)
+        else:
+            merged.append((s, e, ue))
+
+    out: List[Tuple[str, Tuple[int, int, int, int]]] = []
+    pos = 0
+    for s, e, ue in merged:
+        if s > pos:
+            out.append((text[pos:s], _COLOR_WHITE))
+        chunk = text[s:e]
+        out.append((chunk, _color_for_token(chunk, user_emphasis=ue)))
+        pos = e
+    if pos < len(text):
+        out.append((text[pos:], _COLOR_WHITE))
+    return out
+
+
+def _draw_text_colored_line(
+    draw: Any,
+    xy: Tuple[int, int],
+    segments: List[Tuple[str, Tuple[int, int, int, int]]],
+    font: Any,
+    *,
+    strong_shadow: bool = True,
+) -> None:
+    x, y = xy
+    for seg, fill in segments:
+        if not seg:
+            continue
+        if strong_shadow:
+            for dx, dy, a in ((0, 4, 150), (2, 3, 100), (0, 0, 255)):
+                draw.text((x + dx, y + dy), seg, font=font, fill=(0, 0, 0, a))
+        else:
+            draw.text((x + 1, y + 1), seg, font=font, fill=(0, 0, 0, 72))
+        draw.text((x, y), seg, font=font, fill=fill)
+        x += int(draw.textlength(seg, font=font))
+
+
+def _emphasis_from_article(article: Dict[str, Any]) -> List[str]:
+    raw = article.get("_ko_emphasis")
+    if isinstance(raw, list):
+        return [str(x).strip() for x in raw if str(x).strip()]
+    return []
 
 
 def _draw_text_photo(
@@ -707,7 +821,14 @@ def best_single_card_candidate_relaxed(
         min_len = 12 if news_module.is_viral_breaking(a) else 18
         if len(title) < min_len:
             continue
-        s = news_module.score_article(a)
+        if news_module.is_niche_crypto_product_article(a):
+            continue
+        if not news_module.is_mandatory_mainstream_card_topic(a):
+            continue
+        s = news_module.score_instagram_card_article(a)
+        min_sc = news_module.instagram_card_min_score()
+        if s < min_sc:
+            continue
         if s > best_s:
             best_s = s
             best_a = a
@@ -748,7 +869,14 @@ def best_single_card_candidate(
         min_len = 12 if news_module.is_viral_breaking(a) else 18
         if len(title) < min_len:
             continue
-        s = news_module.score_article(a)
+        if news_module.is_niche_crypto_product_article(a):
+            continue
+        if not news_module.is_mandatory_mainstream_card_topic(a):
+            continue
+        s = news_module.score_instagram_card_article(a)
+        min_sc = news_module.instagram_card_min_score()
+        if s < min_sc:
+            continue
         if s > best_s:
             best_s = s
             best_a = a
@@ -867,13 +995,13 @@ def _render_template_photo(article: Dict[str, Any], out_path: str) -> str:
     text_x = PAD_X + (14 if CARD_IMPACT_STYLE else 0)
     line1, line2 = _boa_photo_headline_lines(article, title, subtitle)
 
-    if len(line1) <= 18:
+    if len(line1) <= 16:
         h1s = BOA_H1_PX
-    elif len(line1) <= 26:
-        h1s = max(68, BOA_H1_PX - 8)
+    elif len(line1) <= 24:
+        h1s = max(78, BOA_H1_PX - 6)
     else:
-        h1s = max(58, BOA_H1_PX - 16)
-    h2s = BOA_H2_PX if len(line2) <= 38 else max(40, BOA_H2_PX - 6)
+        h1s = max(68, BOA_H1_PX - 14)
+    h2s = BOA_H2_PX if len(line2) <= 36 else max(46, BOA_H2_PX - 8)
     f_h1 = _load_font_bold(h1s)
     f_h2 = _load_font_bold(h2s) if CARD_IMPACT_STYLE else _load_font_regular(h2s)
     h1_lines = _wrap_lines(draw, line1, f_h1, max_text_w)[:2]
@@ -904,20 +1032,22 @@ def _render_template_photo(article: Dict[str, Any], out_path: str) -> str:
             fill=_accent,
         )
 
-    draw_headline = _draw_text_impact if CARD_IMPACT_STYLE else _draw_text_photo
+    emph_words = _emphasis_from_article(article)
     for ln in h1_lines:
-        draw_headline(draw, (text_x, int(y)), ln, f_h1, accent=CARD_IMPACT_STYLE)
+        if CARD_IMPACT_STYLE:
+            segs = _headline_colored_segments(ln, emphasis_words=emph_words)
+            _draw_text_colored_line(draw, (text_x, int(y)), segs, f_h1, strong_shadow=True)
+        else:
+            _draw_text_photo(draw, (text_x, int(y)), ln, f_h1)
         y += lh1
     for ln in h2_lines:
         if CARD_IMPACT_STYLE:
-            _draw_text_impact(
-                draw,
-                (text_x, int(y)),
-                ln,
-                f_h2,
-                fill=(245, 248, 255, 255),
-                accent=False,
-            )
+            segs = _headline_colored_segments(ln, emphasis_words=emph_words)
+            tinted = [
+                (s, (220, 235, 255, 255) if col == _COLOR_WHITE else col)
+                for s, col in segs
+            ]
+            _draw_text_colored_line(draw, (text_x, int(y)), tinted, f_h2, strong_shadow=True)
         else:
             _draw_text_photo(draw, (text_x, int(y)), ln, f_h2, fill=(248, 250, 255, 255))
         y += lh2
@@ -1221,7 +1351,8 @@ def run_telegram_single_card(
         return None, None
     print(
         "[facts_gate] picked "
-        f"score={news_module.score_article(article)} "
+        f"score={news_module.score_instagram_card_article(article)} "
+        f"mainstream_hook=ok "
         f"source={news_module.article_source_name(article)!r}"
     )
 
@@ -1232,6 +1363,9 @@ def run_telegram_single_card(
         ko_lines = _try_openai_korean_card_lines(article)
         if ko_lines:
             article["_ko_line1"], article["_ko_line2"] = ko_lines
+            article.setdefault("_card_topic", "")
+            if any(k in (article["_ko_line1"] + article["_ko_line2"]).lower() for k in ("코스", "kospi")):
+                article["_card_topic"] = "증시"
         else:
             print("[card_ko] no korean lines — OPENAI_API_KEY 확인")
 
